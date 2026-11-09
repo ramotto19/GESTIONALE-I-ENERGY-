@@ -3415,7 +3415,12 @@ async function boot() {
 }
 if (typeof window !== 'undefined' && !window.__TEST__) tryResume();
 if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => { navigator.serviceWorker.register('service-worker.js').catch(() => {}); });
+  window.addEventListener('load', () => {
+    /* toglie il vecchio service worker (sw.js) delle prime versioni, che poteva tenere in memoria una copia vecchia dell'app */
+    navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => { const u = (r.active && r.active.scriptURL) || ''; if (/\/sw\.js$/.test(u)) r.unregister(); })).catch(() => {});
+    if (window.caches) caches.keys().then((ks) => ks.filter((k) => /^gi-sb-/.test(k)).forEach((k) => caches.delete(k))).catch(() => {});
+    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+  });
 }
 /* traccia in console gli errori che non passano da render() (es. dentro un gestore di click),
    così restano una prova consultabile invece di sparire senza lasciare indizi */
