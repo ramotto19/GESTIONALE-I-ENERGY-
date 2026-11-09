@@ -1430,8 +1430,8 @@ function vMieiDocumenti() {
 /* ---------- azienda ---------- */
 function vAzienda() {
   const tab = S.atab || 'documenti';
-  const tabs = '<div class="tabs" role="tablist">' + [['documenti', 'Documenti impresa'], ['assicurazioni', 'Assicurazioni'], ['mezzi', 'Mezzi e attrezzature'], ['tipologie', 'Tipologie di lavoro']].map((t) => '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-a="atab" data-t="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
-  const f = { documenti: aDocumenti, assicurazioni: aAssicurazioni, mezzi: aMezzi, tipologie: aTipologie }[tab] || aDocumenti;
+  const tabs = '<div class="tabs" role="tablist">' + [['documenti', 'Documenti impresa'], ['assicurazioni', 'Assicurazioni'], ['mezzi', 'Mezzi'], ['attrezzature', 'Attrezzature'], ['tipologie', 'Tipologie di lavoro']].map((t) => '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-a="atab" data-t="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
+  const f = { documenti: aDocumenti, assicurazioni: aAssicurazioni, mezzi: aMezzi, attrezzature: () => aMezzi('att'), tipologie: aTipologie }[tab] || aDocumenti;
   return pageHead('Azienda', 'DURC, certificazioni, assicurazioni, mezzi e requisiti di ogni tipologia di lavoro.') + tabs + f();
 }
 A.atab = (d) => { S.atab = d.t; queueRender(); };
@@ -1476,7 +1476,7 @@ function scadenzaControllo(m, tipo) {
   const c = (m.controlli || []).filter((x) => x.tipo === tipo && x.prossimaScadenza).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))[0];
   return c ? c.prossimaScadenza : '';
 }
-function aMezzi() {
+function aMezzi(kind) {
   const ult = (m) => (m.controlli || []).slice().sort((a, b) => b.data.localeCompare(a.data))[0];
   const nomeM = (m) => '<b>' + esc(m.descrizione) + '</b><div class="small muted">' + esc(lab(TIPI_MEZZO, m.tipo)) + (m.targa ? ' · ' + esc(m.targa) : '') + '</div>';
   const assegn = (m) => esc(nomeD(G('dipendenti', m.assegnatoId)));
@@ -1485,8 +1485,9 @@ function aMezzi() {
   const rows = D('mezzi').sort(byStr((x) => x.descrizione));
   const veicoli = rows.filter((m) => m.tipo !== 'ATTREZZATURA'), attrezzi = rows.filter((m) => m.tipo === 'ATTREZZATURA');
   const tMezzi = tbl([{ h: 'Mezzo', f: nomeM }, { h: 'Assegnato a', f: assegn }, { h: 'Assicurazione', f: (m) => { const a = D('assicurazioni').filter((x) => x.mezzoId === m.id).sort((p, q) => q.dataScadenza.localeCompare(p.dataScadenza))[0]; return a ? scadBadge(a.dataScadenza) : '<span class="muted">—</span>'; } }, { h: 'Revisione', f: (m) => { const s = scadenzaControllo(m, 'REVISIONE'); return s ? scadBadge(s) : '<span class="muted">—</span>'; } }, { h: 'Bollo', f: (m) => { const s = scadenzaControllo(m, 'BOLLO'); return s ? scadBadge(s) : '<span class="muted">—</span>'; } }, { h: 'Ultimo controllo', f: ultCtl }], veicoli, Object.assign({ empty: 'Nessun mezzo. Aggiungi furgoni, cestelli, autocarri…' }, rowOpts));
-  const tAttr = tbl([{ h: 'Attrezzatura', f: nomeM }, { h: 'Assegnato a', f: assegn }, { h: 'Ultimo controllo', f: ultCtl }], attrezzi, Object.assign({ empty: 'Nessuna attrezzatura.' }, rowOpts));
-  return cardScaduti((e) => e.tipo === 'MEZZO') + '<div class="grid g2">' + card('Mezzi', tMezzi, '<button class="btn p sm" data-a="mezNew">+ Mezzo</button>') + card('Attrezzature', tAttr, '<button class="btn p sm" data-a="attrNew">+ Attrezzatura</button>') + '</div>';
+  const tAttr = tbl([{ h: 'Attrezzatura', f: nomeM }, { h: 'Assegnato a', f: assegn }, { h: 'Prossima verifica', f: (m) => { const c = (m.controlli || []).filter((x) => x.prossimaScadenza).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))[0]; return c ? scadBadge(c.prossimaScadenza) : '<span class="muted">—</span>'; } }, { h: 'Ultimo controllo', f: ultCtl }], attrezzi, Object.assign({ empty: 'Nessuna attrezzatura.' }, rowOpts));
+  if (kind === 'att') return cardScaduti((e) => e.tipo === 'MEZZO') + card('Attrezzature', tAttr, '<button class="btn p sm" data-a="attrNew">+ Attrezzatura</button>');
+  return cardScaduti((e) => e.tipo === 'MEZZO') + card('Mezzi', tMezzi, '<button class="btn p sm" data-a="mezNew">+ Mezzo</button>');
 }
 const mezzoCartella = (tipo) => tipo === 'ATTREZZATURA' ? 'Attrezzature' : 'Mezzi';
 A.mezNew = () => openForm({ title: 'Nuovo mezzo', fields: mezzoFields(), values: { attivo: true }, folder: (out) => ['Azienda', 'Mezzi e attrezzature', mezzoCartella(out.tipo), out.descrizione || 'Nuovo mezzo'], onSave: async (v) => { const id = newId('mezzi'); await put('mezzi', id, Object.assign({}, v, { controlli: [] })); go('mezzo', id); } });
@@ -1505,7 +1506,8 @@ const polizzeMezzo = (m) => D('assicurazioni').filter((x) => x.mezzoId === m.id)
 function vMezzo() {
   const m = G('mezzi', S.id);
   if (!m) return '<div class="empty">Mezzo non trovato. <button class="lnk" data-a="go" data-r="azienda">Torna ad Azienda</button></div>';
-  const tab = S.mtab || 'pano', id = esc(m.id);
+  const isAtt = m.tipo === 'ATTREZZATURA';
+  const tab = isAtt && (S.mtab === 'ass' || S.mtab === 'mul') ? 'pano' : S.mtab || 'pano', id = esc(m.id);
   const sc = (v) => (v ? scadBadge(v) : '<span class="muted">Nessuna registrata</span>');
   const sortD = (arr) => (arr || []).slice().sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
   const pol = polizzeMezzo(m), man = m.manutenzioni || [], sin = m.sinistri || [], mul = m.multe || [];
@@ -1517,22 +1519,25 @@ function vMezzo() {
   const sinT = tbl([{ h: 'Sinistro', f: (x) => '<b>' + esc(fmtD(x.data)) + '</b><div class="small muted">' + esc(x.luogo || '') + (x.numeroSinistro ? ' · pratica ' + esc(x.numeroSinistro) : '') + '</div>' }, { h: 'Stato', f: (x) => stBadge(STATI_SIN, x.stato || 'APERTO') }, { h: 'Controparte', f: (x) => esc(x.controparte) }, { h: 'Importo', r: true, f: (x) => x.importo ? eur(x.importo) : '' }, { h: 'Documenti', f: (x) => fileLink(x.file) }], sortD(sin), { empty: 'Nessun sinistro registrato.', row: (x) => 'data-a="sinEdit" data-id="' + id + '" data-x="' + esc(x.id) + '"' });
   const mulT = tbl([{ h: 'Multa', f: (x) => '<b>' + esc(fmtD(x.data)) + '</b><div class="small muted">' + esc(x.motivo || x.luogo || '') + (x.verbale ? ' · verbale ' + esc(x.verbale) : '') + '</div>' }, { h: 'Conducente', f: (x) => { const d = x.conducenteId && G('dipendenti', x.conducenteId); return esc(d ? nomeD(d) : ''); } }, { h: 'Stato', f: (x) => stBadge(STATI_MULTA, x.stato || 'DA_PAGARE') }, { h: 'Importo', r: true, f: (x) => x.importo ? eur(x.importo) : '' }, { h: 'Pagare entro', f: (x) => x.stato === 'PAGATA' || !x.scadenzaPagamento ? '' : scadBadge(x.scadenzaPagamento) }, { h: 'Verbale', f: (x) => fileLink(x.file) }, { h: 'Ricevuta', f: (x) => fileLink(x.ricevuta) }], sortD(mul), { empty: 'Nessuna multa registrata.', row: (x) => 'data-a="mulEdit" data-id="' + id + '" data-x="' + esc(x.id) + '"' });
   let body = '';
-  if (tab === 'rev') body = card('Revisioni e bollo', ctlT(ctlRows(['REVISIONE', 'BOLLO']), 'Nessuna revisione o bollo registrati.'), ctlBtn('REVISIONE') + ctlBtn('BOLLO'));
+  if (tab === 'rev' && isAtt) body = card('Verifiche e controlli periodici', ctlT(ctlRows([], true), 'Nessuna verifica registrata.'), ctlBtn('ALTRO').replace('+ Controllo', '+ Verifica'));
+  else if (tab === 'rev') body = card('Revisioni e bollo', ctlT(ctlRows(['REVISIONE', 'BOLLO']), 'Nessuna revisione o bollo registrati.'), ctlBtn('REVISIONE') + ctlBtn('BOLLO'));
   else if (tab === 'ass') body = card('Assicurazioni e quietanze', polTab, '<button class="btn p sm" data-a="assNewMezzo" data-id="' + id + '">+ Polizza</button>') + '<div class="hint">Quietanza e polizza si caricano aprendo la riga. La scadenza va in automatico nello scadenzario.</div>';
-  else if (tab === 'man') body = card('Tagliandi e manutenzioni (anche straordinarie)', manT, '<button class="btn p sm" data-a="manNew" data-id="' + id + '">+ Intervento</button>') + card('Altri controlli e verifiche', ctlT(ctlRows(['REVISIONE', 'BOLLO'], true), 'Nessun altro controllo.'), ctlBtn('ALTRO'));
+  else if (tab === 'man') body = card('Tagliandi e manutenzioni (anche straordinarie)', manT, '<button class="btn p sm" data-a="manNew" data-id="' + id + '">+ Intervento</button>') + (isAtt ? '' : card('Altri controlli e verifiche', ctlT(ctlRows(['REVISIONE', 'BOLLO'], true), 'Nessun altro controllo.'), ctlBtn('ALTRO')));
   else if (tab === 'sin') body = card('Sinistri', sinT, '<button class="btn p sm" data-a="sinNew" data-id="' + id + '">+ Sinistro</button>');
   else if (tab === 'mul') body = card('Multe', mulT, '<button class="btn p sm" data-a="mulNew" data-id="' + id + '">+ Multa</button>');
   else {
     const rev = scadenzaControllo(m, 'REVISIONE'), bol = scadenzaControllo(m, 'BOLLO'), p0 = pol[0], tg = (m.manutenzioni || []).filter((x) => x.prossimaScadenza).sort((a, b) => String(b.data).localeCompare(String(a.data)))[0];
     const riga = (t, sub, v) => '<div class="blk"><div style="flex:1"><b>' + t + '</b>' + (sub ? '<div class="small muted">' + sub + '</div>' : '') + '</div>' + v + '</div>';
     const nSinAp = sin.filter((x) => x.stato !== 'CHIUSO').length, nMulDa = mul.filter((x) => (x.stato || 'DA_PAGARE') === 'DA_PAGARE').length;
-    body = card('Scadenze del mezzo', riga('Revisione', '', sc(rev)) + riga('Bollo', 'Tassa di possesso', sc(bol)) + riga('Assicurazione', p0 ? esc(lab(TIPI_ASS, p0.tipo)) + ' · ' + esc(p0.compagnia) : 'Nessuna polizza collegata', sc(p0 && p0.dataScadenza)) + riga('Prossimo tagliando / intervento', tg ? esc(lab(TIPI_MAN, tg.tipo)) : '', sc(tg && tg.prossimaScadenza))) +
+    const vf = (m.controlli || []).filter((x) => x.prossimaScadenza).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))[0];
+    if (isAtt) body = card('Scadenze dell’attrezzatura', riga('Prossima verifica', vf ? esc(lab(TIPI_CONTROLLO, vf.tipo)) : '', sc(vf && vf.prossimaScadenza)) + riga('Prossimo intervento', tg ? esc(lab(TIPI_MAN, tg.tipo)) : '', sc(tg && tg.prossimaScadenza))) + card('Riepilogo', riga('Infortuni e danni', sin.length + (sin.length === 1 ? ' registrato' : ' registrati'), nSinAp ? bd(nSinAp + (nSinAp === 1 ? ' aperto' : ' aperti'), 'amber') : '<span class="muted">nessuno aperto</span>') + riga('Interventi di manutenzione', man.length + (man.length === 1 ? ' registrato' : ' registrati'), ''));
+    else body = card('Scadenze del mezzo', riga('Revisione', '', sc(rev)) + riga('Bollo', 'Tassa di possesso', sc(bol)) + riga('Assicurazione', p0 ? esc(lab(TIPI_ASS, p0.tipo)) + ' · ' + esc(p0.compagnia) : 'Nessuna polizza collegata', sc(p0 && p0.dataScadenza)) + riga('Prossimo tagliando / intervento', tg ? esc(lab(TIPI_MAN, tg.tipo)) : '', sc(tg && tg.prossimaScadenza))) +
       card('Riepilogo', riga('Sinistri', sin.length + (sin.length === 1 ? ' registrato' : ' registrati'), nSinAp ? bd(nSinAp + (nSinAp === 1 ? ' aperto' : ' aperti'), 'amber') : '<span class="muted">nessuno aperto</span>') + riga('Multe', mul.length + (mul.length === 1 ? ' registrata' : ' registrate'), nMulDa ? bd(nMulDa + ' da pagare', 'red') : '<span class="muted">nessuna da pagare</span>') + riga('Interventi di manutenzione', man.length + (man.length === 1 ? ' registrato' : ' registrati'), '') + '<div class="hint" style="margin-top:8px">Le scadenze si aggiornano da sole: caricando una nuova revisione, bollo, polizza o tagliando con la prossima scadenza.</div>');
   }
-  const tabs = '<div class="tabs" role="tablist">' + MTABS.map((t) => '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-a="mtab" data-t="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
+  const tabs = '<div class="tabs" role="tablist">' + MTABS.filter((t) => !isAtt || (t[0] !== 'ass' && t[0] !== 'mul')).map((t) => '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-a="mtab" data-t="' + t[0] + '">' + (isAtt && t[0] === 'rev' ? 'Verifiche periodiche' : isAtt && t[0] === 'sin' ? 'Infortuni e danni' : t[1]) + '</button>').join('') + '</div>';
   return '<div class="hd"><div><button class="lnk" data-a="backMezzi">← Azienda</button><h1 style="margin-top:8px">' + esc(m.descrizione) + '</h1><p class="sub">' + esc(lab(TIPI_MEZZO, m.tipo)) + (m.targa ? ' · ' + esc(m.targa) : '') + '</p></div><div class="row"><button class="btn" data-a="mezEdit" data-id="' + id + '">Modifica</button></div></div>' + tabs + '<div class="stack">' + body + '</div>';
 }
-A.backMezzi = () => { S.atab = 'mezzi'; go('azienda'); };
+A.backMezzi = () => { const m = G('mezzi', S.id); S.atab = m && m.tipo === 'ATTREZZATURA' ? 'attrezzature' : 'mezzi'; go('azienda'); };
 A.mtab = (d) => { S.mtab = d.t; queueRender(); };
 const subMezzo = (d, key, title, fields, defaults, sub) => { const m = G('mezzi', d.id); const i = d.x ? (m[key] || []).findIndex((c) => c.id === d.x) : null; if (d.x && i < 0) return; editSub({ col: 'mezzi', id: d.id, key, i, title, fields, defaults, folder: mezzoBase(m).concat([sub]) }); };
 A.manNew = (d) => subMezzo(d, 'manutenzioni', 'Nuovo intervento', manFields(), { data: today(), tipo: 'TAGLIANDO' }, 'Manutenzioni');
