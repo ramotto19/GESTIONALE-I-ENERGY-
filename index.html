@@ -28,7 +28,7 @@ body{font:14px/1.45 'IBM Plex Sans',system-ui,sans-serif}
 button,input,select,textarea{font:inherit;color:inherit}
 .app{display:flex;min-height:100vh}
 .side{width:224px;flex-shrink:0;background:var(--side);padding:22px 14px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh;overflow:auto}
-.brand{font:700 26px/1 'Barlow Condensed',sans-serif;letter-spacing:.05em;color:#fff;padding:0 10px 18px}
+.brand{font:700 26px/1 'Barlow Condensed',sans-serif;letter-spacing:.05em;color:#fff;padding:0 10px 18px}.brandlogo{display:block;width:52px;height:52px;border-radius:12px;background:#fff;margin:0 0 12px;object-fit:contain}@media (max-width:900px){.brandlogo{display:inline-block;width:40px;height:40px;margin:0 10px 0 0;vertical-align:middle}}
 .nv{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 12px;border:0;border-radius:6px;background:none;color:var(--sidetx);font:500 15px 'IBM Plex Sans',sans-serif;text-align:left;cursor:pointer;width:100%}
 .nv svg{width:17px;height:17px;flex-shrink:0}
 .nv:hover,.nv.on{background:#2C3238;color:#fff}
@@ -774,7 +774,7 @@ function shell() {
   if (S.unauthorized) return '<div class="center card"><h2>Accesso non autorizzato</h2><p class="muted">L\u2019account <b>' + esc(S.pendingEmail || '') + '</b> non \u00e8 ancora abilitato. Chiedi all\u2019amministratore di aggiungerti da \u00abOre del personale \u203a Accessi\u00bb, oppure verifica che il backend sia configurato correttamente se sei il primo utente.</p><button class="btn" data-a="signout">Cambia account</button></div>';
   const ready = neededCols().every((c) => S.loaded[c]) || S.late;
   const trouble = S.syncTrouble ? '<div class="alert red" style="margin-bottom:16px">Il backend non risponde da un po’: quello che vedi potrebbe non essere aggiornato. <button class="btn sm" data-a="reload" style="margin-left:8px">Ricarica la pagina</button></div>' : '';
-  return '<div class="app"><nav class="side" aria-label="Principale"><div class="brand">GESTIONALE<br>IMPIANTI</div>' + navItems().map((n) => '<button class="nv' + (navOn(n[0], n[2]) ? ' on' : '') + '" data-a="go" data-r="' + n[0] + '"' + (n[2] ? ' data-id="' + esc(n[2]) + '"' : '') + '>' + navIcon(n[0]) + '<span>' + esc(n[1]) + '</span></button>').join('') +
+  return '<div class="app"><nav class="side" aria-label="Principale"><div class="brand"><img src="icons/icon-192.png" alt="I-Energy" class="brandlogo">GESTIONALE<br>IMPIANTI</div>' + navItems().map((n) => '<button class="nv' + (navOn(n[0], n[2]) ? ' on' : '') + '" data-a="go" data-r="' + n[0] + '"' + (n[2] ? ' data-id="' + esc(n[2]) + '"' : '') + '>' + navIcon(n[0]) + '<span>' + esc(n[1]) + '</span></button>').join('') +
     '<div class="sidefoot"><div>' + esc(S.me || 'Utente') + ' · ' + (S.admin ? 'Amministratore' : 'Dipendente') + '</div>' + (window.__logout ? '<button data-a="logout">Esci</button>' : '') + (S.admin ? '<button data-a="export">Esporta dati (JSON)</button><button data-a="import">Importa dati (JSON)</button>' : '') + (S.admin && hasDemo() ? '<button data-a="delDemo">Elimina dati di esempio</button>' : '') + '</div></nav><main class="main" id="main">' + trouble + (ready ? view() : '<div class="empty">Caricamento dei dati…</div>') + '</main></div>';
 }
 function view() {
@@ -3043,7 +3043,7 @@ async function loginGoogle() {
 }
 function showLogin(err) {
   const el = $('#app'); if (!el) return;
-  el.innerHTML = '<div class="center card"><h1 style="font-size:28px">Gestionale Impianti</h1><p class="muted">Accedi con il tuo account Google per continuare.</p><div id="gsiBtn" style="display:flex;justify-content:center;margin-top:10px"><button type="button" class="btn p" id="gLogin" style="min-height:44px;padding:0 22px">Accedi con Google</button></div>' + (err ? '<p class="err" style="margin-top:10px">' + esc(err) + '</p>' : '') + '</div>';
+  el.innerHTML = '<div class="center card"><img src="icons/icon-192.png" alt="I-Energy" style="display:block;width:72px;height:72px;border-radius:16px;margin:0 auto 12px"><h1 style="font-size:28px">Gestionale Impianti</h1><p class="muted">Accedi con il tuo account Google per continuare.</p><div id="gsiBtn" style="display:flex;justify-content:center;margin-top:10px"><button type="button" class="btn p" id="gLogin" style="min-height:44px;padding:0 22px">Accedi con Google</button></div>' + (err ? '<p class="err" style="margin-top:10px">' + esc(err) + '</p>' : '') + '</div>';
   const b = $('#gLogin'); if (b) b.onclick = loginGoogle;
 }
 /* un problema temporaneo (rete assente, risposta non pronta) non deve buttare via una sessione valida: si riprova qualche volta */
