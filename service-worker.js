@@ -2,8 +2,8 @@
    riaprire (con un messaggio, non con i dati) quando il dispositivo è offline.
    Non tocca mai le chiamate al backend (sono POST, qui gestiamo solo GET) né
    le richieste verso altri domini (Google Fonts, Apps Script, ecc.). */
-const CACHE = 'gestionale-impianti-v2';
-const SHELL = ['./', './index.html', './manifest.json'];
+const CACHE = 'gestionale-impianti-v3';
+const SHELL = ['./', './index.html', './manifest.json?v=2'];
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
