@@ -1430,7 +1430,7 @@ function vMieiDocumenti() {
 /* ---------- azienda ---------- */
 function vAzienda() {
   const tab = S.atab || 'documenti';
-  const tabs = '<div class="tabs" role="tablist">' + [['documenti', 'Documenti impresa'], ['assicurazioni', 'Assicurazioni'], ['mezzi', 'Mezzi'], ['attrezzature', 'Attrezzature'], ['tipologie', 'Tipologie di lavoro']].map((t) => '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-a="atab" data-t="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
+  const tabs = '<div class="tabs" role="tablist">' + [['documenti', 'Documenti impresa'], ['assicurazioni', 'Assicurazioni impresa'], ['mezzi', 'Mezzi'], ['attrezzature', 'Attrezzature'], ['tipologie', 'Tipologie di lavoro']].map((t) => '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-a="atab" data-t="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
   const f = { documenti: aDocumenti, assicurazioni: aAssicurazioni, mezzi: aMezzi, attrezzature: () => aMezzi('att'), tipologie: aTipologie }[tab] || aDocumenti;
   return pageHead('Azienda', 'DURC, certificazioni, assicurazioni, mezzi e requisiti di ogni tipologia di lavoro.') + tabs + f();
 }
@@ -1461,7 +1461,7 @@ function aAssicurazioni() {
     const tb = tbl([{ h: 'Sinistro', f: (s) => '<b>' + esc(fmtD(s.data)) + '</b><div class="small muted">' + esc(s.luogo || '') + (s.numeroSinistro ? ' · pratica ' + esc(s.numeroSinistro) : '') + '</div>' }, { h: 'Stato', f: (s) => stBadge(STATI_SIN, s.stato || 'APERTO') }, { h: 'Controparte', f: (s) => esc(s.controparte) }, { h: 'Importo', r: true, f: (s) => s.importo ? eur(s.importo) : '' }, { h: 'Documenti', f: (s) => fileLink(s.file) }], sl, { empty: 'Nessun sinistro su questa polizza.', row: (s) => 'data-a="sinAssEdit" data-id="' + esc(x.id) + '" data-x="' + esc(s.id) + '"' });
     return '<div style="margin-bottom:14px"><div class="row" style="justify-content:space-between;align-items:center"><b>' + esc(lab(TIPI_ASS, x.tipo)) + ' · ' + esc(x.compagnia || '') + '</b><button class="btn sm" data-a="sinAssNew" data-id="' + esc(x.id) + '">+ Sinistro</button></div>' + tb + '</div>';
   }).join('');
-  return cardScaduti((e) => e.tipo === 'ASSICURAZIONE') + card('Assicurazioni aziendali', t + nota, '<button class="btn p sm" data-a="assNew">+ Polizza</button>') + card('Sinistri (polizze RCT e aziendali)', sinBlocchi || '<div class="empty">Nessuna polizza.</div>');
+  return cardScaduti((e) => e.tipo === 'ASSICURAZIONE') + card('Assicurazioni impresa', t + nota, '<button class="btn p sm" data-a="assNew">+ Polizza</button>') + card('Sinistri (polizze RCT e aziendali)', sinBlocchi || '<div class="empty">Nessuna polizza.</div>');
 }
 A.assNew = () => openForm({ title: 'Polizza', wide: true, fields: assFields(), values: {}, folder: ['Azienda', 'Assicurazioni'], onSave: (v) => put('assicurazioni', newId('assicurazioni'), v) });
 A.assEdit = (d) => { const x = G('assicurazioni', d.id); openForm({ title: 'Polizza', wide: true, fields: assFields(), values: x, folder: ['Azienda', 'Assicurazioni'], onSave: (v) => patch('assicurazioni', x.id, v), onDelete: () => remove('assicurazioni', x.id) }); };
