@@ -771,7 +771,7 @@ const NAV_ICONS = {
 const NAV_ICON_LIBRO = '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>';
 const navIcon = (route) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (NAV_ICONS[route] || NAV_ICON_LIBRO) + '</svg>';
 const neededCols = () => (S.admin ? COLS : ['accessi', 'commesseElenco']);
-const navOn = (r, id) => (r === 'reg' ? S.route === 'reg' && S.id === id : ({ commessa: 'commesse', dipendente: 'personale', mezzo: 'azienda' }[S.route] || S.route) === r);
+const navOn = (r, id) => (r === 'reg' ? S.route === 'reg' && S.id === id : ({ commessa: 'commesse', cliente: 'clienti', dipendente: 'personale', mezzo: 'azienda' }[S.route] || S.route) === r);
 const hasDemo = () => COLS.some((c) => D(c).some((x) => x.demo));
 function shell() {
   if (S.offline) return '<div class="center card"><h2>Accesso non configurato</h2><p class="muted">Manca la configurazione di CLIENT_ID o SCRIPT_URL in fondo al file index.html. Vedi il README per le istruzioni.</p></div>';
@@ -789,6 +789,7 @@ function view() {
     case 'planning': return vPlanning();
     case 'scadenzario': return vScadenzario();
     case 'clienti': return vClienti();
+    case 'cliente': return vCliente();
     case 'personale': return vPersonale();
     case 'dipendente': return vDipendente();
     case 'azienda': return vAzienda();
@@ -822,7 +823,7 @@ function ricercaGlobale(q) {
   const hit = (...vals) => vals.some((v) => String(v || '').toLowerCase().includes(q));
   const out = [];
   D('commesse').forEach((c) => { if (hit(c.codice, c.titolo, clienteNome(c.clienteId), c.citta)) out.push({ tipo: 'Commessa', titolo: (c.codice || '') + ' · ' + (c.titolo || ''), sub: [clienteNome(c.clienteId), c.citta].filter(Boolean).join(' · '), a: 'goRef', r: 'commessa', id: c.id }); });
-  D('clienti').forEach((c) => { if (hit(c.ragioneSociale, c.piva, c.citta)) out.push({ tipo: 'Cliente', titolo: c.ragioneSociale, sub: c.citta || '', a: 'cliEdit', id: c.id }); });
+  D('clienti').forEach((c) => { if (hit(c.ragioneSociale, c.piva, c.citta)) out.push({ tipo: 'Cliente', titolo: c.ragioneSociale, sub: c.citta || '', a: 'goRef', r: 'cliente', id: c.id }); });
   D('dipendenti').forEach((d) => { if (hit(nomeD(d), d.mansione)) out.push({ tipo: 'Dipendente', titolo: nomeD(d), sub: d.mansione || '', a: 'goRef', r: 'dipendente', id: d.id }); });
   D('mezzi').forEach((m) => { if (hit(m.descrizione, m.targa)) out.push({ tipo: 'Mezzo', titolo: m.descrizione, sub: m.targa || '', a: 'goRef', r: 'mezzo', id: m.id }); });
   D('docAzienda').forEach((x) => { if (hit(x.titolo, lab(TIPI_DOC_AZ, x.tipo), x.ente)) out.push({ tipo: 'Documento azienda', titolo: x.titolo || lab(TIPI_DOC_AZ, x.tipo), sub: x.ente || '', a: 'daEdit', id: x.id }); });
@@ -883,11 +884,11 @@ C.fstato = (d, v) => { S.fstato = v; queueRender(); };
 A.openC = (d) => go('commessa', d.id, 'panoramica');
 A.go = (d) => go(d.r, d.id || null);
 
-function commessaFields() {
+function commessaFields(keepId) {
   return [
     { k: 'codice', l: 'Codice', req: true, half: true },
     { k: 'stato', l: 'Stato', t: 'select', req: true, half: true, opts: STATI_COMMESSA },
-    { k: 'clienteId', l: 'Cliente', t: 'select', req: true, opts: D('clienti').sort(byStr((x) => x.ragioneSociale)).map((c) => [c.id, c.ragioneSociale]) },
+    { k: 'clienteId', l: 'Cliente', t: 'select', req: true, opts: D('clienti').filter((c) => statoCli(c) === 'ACQUISITO' || c.id === keepId).sort(byStr((x) => x.ragioneSociale)).map((c) => [c.id, c.ragioneSociale]) },
     { k: 'titolo', l: 'Lavori (titolo)', req: true },
     { k: 'descrizione', l: 'Descrizione dei lavori', t: 'textarea' },
     { k: 'tipiLavoro', l: 'Tipologie di lavoro', t: 'multi', opts: D('tipiLavoro').sort(byStr((x) => x.nome)).map((t) => [t.id, t.nome]) },
@@ -903,16 +904,20 @@ function commessaFields() {
     { k: 'note', l: 'Note', t: 'textarea' }
   ];
 }
-A.newC = () => {
-  if (!D('clienti').length) { toast('Aggiungi prima almeno un cliente.', 'err'); go('clienti'); return; }
+function nuovaCommessa(preset, after) {
+  preset = preset || {};
+  if (!preset.clienteId && !D('clienti').some((c) => statoCli(c) === 'ACQUISITO')) { toast('Serve almeno un cliente acquisito per creare una commessa. Segna un cliente come acquisito, oppure carica un’offerta e segnala l’accettazione.', 'err'); go('clienti'); return; }
+  const docs = preset._docs; delete preset._docs;
   openForm({
-    title: 'Nuova commessa', wide: true, info: 'L\u2019iter (preventivo, conferma d\u2019ordine, POS, DICO…) e la checklist di cantiere si creano da soli in base alle tipologie scelte.',
-    fields: commessaFields(), values: { codice: nextCodice(), stato: 'OFFERTA', aliquotaIva: 22 },
+    title: 'Nuova commessa', wide: true, info: 'L’iter (preventivo, conferma d’ordine, POS, DICO…) e la checklist di cantiere si creano da soli in base alle tipologie scelte.',
+    fields: commessaFields(preset.clienteId), values: Object.assign({ codice: nextCodice(), stato: 'OFFERTA', aliquotaIva: 22 }, preset),
     folder: (out) => ['Commesse', out.codice || 'Nuova commessa'],
-    onSave: async (v) => { const id = newId('commesse'); await put('commesse', id, Object.assign({}, v, { iter: newIter(), fasi: [], sicurezza: [], pagamenti: [], costi: [], creataIl: today() })); go('commessa', id, 'panoramica'); }
+    onSave: async (v) => { const id = newId('commesse'); await put('commesse', id, Object.assign({}, v, { iter: newIter(), fasi: [], sicurezza: [], pagamenti: [], costi: [], creataIl: today() }, docs ? { documentiAmm: docs } : {})); if (after) { try { await after(id); } catch (e) { /* il collegamento si rifà a mano */ } } go('commessa', id, 'panoramica'); }
   });
-};
-A.editC = (d) => { const c = G('commesse', d.id); openForm({ title: 'Modifica commessa', wide: true, fields: commessaFields(), values: c, folder: ['Commesse', commessaLabel(c)], onSave: (v) => patch('commesse', c.id, v), onDelete: S.admin ? async () => { await remove('commesse', c.id); go('commesse'); } : null }); };
+}
+A.newC = () => nuovaCommessa({});
+A.newCCli = (d) => nuovaCommessa({ clienteId: d.id });
+A.editC = (d) => { const c = G('commesse', d.id); openForm({ title: 'Modifica commessa', wide: true, fields: commessaFields(c.clienteId), values: c, folder: ['Commesse', commessaLabel(c)], onSave: (v) => patch('commesse', c.id, v), onDelete: S.admin ? async () => { await remove('commesse', c.id); go('commesse'); } : null }); };
 
 /* ---------- scheda commessa ---------- */
 const CTABS = [['panoramica', 'Panoramica'], ['iter', 'Iter'], ['cantiere', 'Cantiere'], ['sicurezza', 'Sicurezza'], ['economia', 'Amministrazione'], ['documenti', 'Documenti'], ['squadre', 'Squadre']];
@@ -1076,7 +1081,11 @@ A.sicEdit = (d) => editSub({ col: 'commesse', id: d.id, key: 'sicurezza', i: d.i
 
 /* --- amministrazione --- */
 const pagFields = () => [{ k: 'tipo', l: 'Tipo', t: 'select', req: true, half: true, opts: TIPI_PAG }, { k: 'importo', l: 'Importo (€)', t: 'number', req: true, half: true }, { k: 'descrizione', l: 'Descrizione', ph: 'Es. SAL 1 al 30%' }, { k: 'dataScadenza', l: 'Scadenza di pagamento', t: 'date', half: true }, { k: 'numeroFattura', l: 'N. fattura', half: true }];
-const TIPI_DOC_COMM = [['PREVENTIVO', 'Preventivo'], ['CONFERMA_ORDINE', 'Conferma d’ordine'], ['CONTRATTO', 'Contratto'], ['DICO', 'DICO'], ['PROGETTO', 'Progetto'], ['VALUTAZIONE_ENERGETICA', 'Valutazione energetica'], ['BOLLETTA_CLIENTE', 'Bolletta cliente'], ['SCHEDA_TECNICA', 'Scheda tecnica materiali'], ['ALTRO', 'Altro']];
+const TIPI_CLI_STATO = [['POTENZIALE', 'Potenziale', 'amber'], ['ACQUISITO', 'Acquisito', 'green']];
+const ESITI_OFF = [['INVIATA', 'Inviata', 'blue'], ['TRATTATIVA', 'In trattativa', 'amber'], ['ACCETTATA', 'Accettata', 'green'], ['RIFIUTATA', 'Rifiutata', 'red']];
+/* stato del cliente: se non è mai stato impostato si deduce (con commesse = acquisito), così i clienti già presenti non vanno toccati */
+const statoCli = (c) => c.stato || (D('commesse').some((x) => x.clienteId === c.id) ? 'ACQUISITO' : 'POTENZIALE');
+const TIPI_DOC_COMM = [['PREVENTIVO', 'Preventivo'], ['OFFERTA_ACCETTATA', 'Offerta accettata'], ['CONFERMA_ORDINE', 'Conferma d’ordine'], ['CONTRATTO', 'Contratto'], ['DICO', 'DICO'], ['PROGETTO', 'Progetto'], ['VALUTAZIONE_ENERGETICA', 'Valutazione energetica'], ['BOLLETTA_CLIENTE', 'Bolletta cliente'], ['SCHEDA_TECNICA', 'Scheda tecnica materiali'], ['ALTRO', 'Altro']];
 /* tipi che finiscono nella sezione "Progetti e documentazione tecnica" invece che in
    "Documentazione amministrativa": stesso elenco (documentiAmm), stesso modulo di
    caricamento, solo raggruppati in due card diverse in base al tipo — e su Drive finiscono
@@ -1085,6 +1094,7 @@ const TIPI_DOC_TEC = ['PROGETTO', 'VALUTAZIONE_ENERGETICA', 'BOLLETTA_CLIENTE', 
 const docCommCartella = (tipo) => TIPI_DOC_TEC.includes(tipo) ? 'Documentazione tecnica' : 'Documentazione amministrativa';
 const docCommFields = () => [{ k: 'tipo', l: 'Tipo di documento', t: 'select', req: true, opts: TIPI_DOC_COMM }, { k: 'titolo', l: 'Titolo (facoltativo)' }, { k: 'data', l: 'Data documento', t: 'date', half: true }, { k: 'scadenza', l: 'Scadenza (se prevista)', t: 'date', half: true }, { k: 'file', l: 'File', t: 'file' }, { k: 'note', l: 'Note', t: 'textarea' }];
 A.docCommNew = (d) => editSub({ col: 'commesse', id: d.id, key: 'documentiAmm', title: 'Nuovo documento', fields: docCommFields(), folder: (out) => ['Commesse', commessaLabel(G('commesse', d.id)), docCommCartella(out.tipo)] });
+A.docOffNew = (d) => editSub({ col: 'commesse', id: d.id, key: 'documentiAmm', title: 'Nuovo documento', fields: docCommFields(), defaults: { tipo: 'PREVENTIVO' }, folder: (out) => ['Commesse', commessaLabel(G('commesse', d.id)), docCommCartella(out.tipo)] });
 A.docTecNew = (d) => editSub({ col: 'commesse', id: d.id, key: 'documentiAmm', title: 'Nuovo documento tecnico', fields: docCommFields(), defaults: { tipo: 'PROGETTO' }, folder: (out) => ['Commesse', commessaLabel(G('commesse', d.id)), docCommCartella(out.tipo)] });
 A.docCommEdit = (d) => { const x = G('commesse', d.id), i = (x.documentiAmm || []).findIndex((a) => a.id === d.x); if (i >= 0) editSub({ col: 'commesse', id: d.id, key: 'documentiAmm', i, title: 'Documento', fields: docCommFields(), folder: (out) => ['Commesse', commessaLabel(x), docCommCartella(out.tipo)] }); };
 /* gallerie foto (sopralluogo/installazione): a differenza di "Documentazione" permettono di
@@ -1114,6 +1124,7 @@ A.fotoDel = async (d) => {
   applyLocalWrite('commesse', c.id, c);
   await patch('commesse', c.id, { [d.key]: c[d.key] });
 };
+const colDocComm = [{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo || lab(TIPI_DOC_COMM, x.tipo)) + '</b><div class="small muted">' + esc(lab(TIPI_DOC_COMM, x.tipo)) + '</div>' }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Scadenza', f: (x) => x.scadenza ? scadBadge(x.scadenza) : '<span class="muted">—</span>' }, { h: 'File', f: (x) => fileLink(x.file) }];
 function tabEconomia(c) {
   const inc = incassatoC(c), prev = previstoC(c), costi = costiC(c);
   const pag = tbl([
@@ -1127,11 +1138,12 @@ function tabEconomia(c) {
   const cst = tbl([{ h: 'Costo', f: (x) => '<b>' + esc(x.descrizione) + '</b>' }, { h: 'Fornitore', f: (x) => esc(x.fornitore) }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Importo', r: true, f: (x) => eur(x.importo) }], c.costi || [], { empty: 'Nessun costo registrato.', row: (x, i) => 'data-a="costEdit" data-id="' + esc(c.id) + '" data-i="' + i + '"' });
   const docsAmm = (c.documentiAmm || []).filter((x) => !TIPI_DOC_TEC.includes(x.tipo)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
   const docsTec = (c.documentiAmm || []).filter((x) => TIPI_DOC_TEC.includes(x.tipo)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
-  const colDocComm = [{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo || lab(TIPI_DOC_COMM, x.tipo)) + '</b><div class="small muted">' + esc(lab(TIPI_DOC_COMM, x.tipo)) + '</div>' }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Scadenza', f: (x) => x.scadenza ? scadBadge(x.scadenza) : '<span class="muted">—</span>' }, { h: 'File', f: (x) => fileLink(x.file) }];
-  const docC = tbl(colDocComm, docsAmm, { empty: 'Nessun documento caricato: preventivi, conferme d’ordine, contratti, DICO…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
-  const docT = tbl(colDocComm, docsTec, { empty: 'Nessun documento caricato: progetti, valutazioni energetiche, bollette del cliente, schede tecniche dei materiali…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
+  const OFF_T = ['PREVENTIVO', 'OFFERTA_ACCETTATA'];
+  const docOff = tbl(colDocComm, docsAmm.filter((x) => OFF_T.includes(x.tipo)), { empty: 'Nessuna offerta o preventivo: preventivo, revisioni, offerta accettata…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
+  const docC = tbl(colDocComm, docsAmm.filter((x) => !OFF_T.includes(x.tipo)), { empty: 'Nessun documento caricato: contratto, conferma d’ordine, DICO…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
+  const docT_unused = tbl(colDocComm, docsTec, { empty: 'Nessun documento caricato: progetti, valutazioni energetiche, bollette del cliente, schede tecniche dei materiali…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
   return '<div class="grid g4" style="margin-bottom:16px">' + kpi('Importo contratto', eur(c.importo), '+ IVA ' + (c.aliquotaIva || 0) + '%') + kpi('Incassato', eur(inc), (Number(c.importo) ? Math.round(100 * inc / Number(c.importo)) : 0) + '% del contratto') + kpi('Ancora da incassare', eur(Math.max(0, prev - inc)), 'Su scadenze registrate: ' + eur(prev)) + kpi('Margine attuale', eur(Number(c.importo) - costi), 'Costi registrati: ' + eur(costi)) + '</div><div class="stack">' +
-    card('Pagamenti e incassi', pag, '<button class="btn p sm" data-a="pagNew" data-id="' + esc(c.id) + '">+ Pagamento</button>') + card('Costi', cst, '<button class="btn p sm" data-a="costNew" data-id="' + esc(c.id) + '">+ Costo</button>') + card('Documentazione', docC, '<button class="btn p sm" data-a="docCommNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Progetti e documentazione tecnica', docT, '<button class="btn p sm" data-a="docTecNew" data-id="' + esc(c.id) + '">+ Documento</button>') + fotoCard(c, 'fotoSopralluogo', 'Foto sopralluogo') + fotoCard(c, 'fotoInstallazione', 'Foto installazione') + '</div>';
+    card('Offerte e preventivi', docOff, '<button class="btn p sm" data-a="docOffNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Contratto e ordini', docC, '<button class="btn p sm" data-a="docCommNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Pagamenti e incassi', pag, '<button class="btn p sm" data-a="pagNew" data-id="' + esc(c.id) + '">+ Pagamento</button>') + card('Costi e fornitori', cst, '<button class="btn p sm" data-a="costNew" data-id="' + esc(c.id) + '">+ Costo</button>') + '</div>';
 }
 A.pagNew = (d) => editSub({ col: 'commesse', id: d.id, key: 'pagamenti', title: 'Scadenza di pagamento', fields: pagFields(), defaults: { incassi: [] } });
 A.pagEdit = (d) => editSub({ col: 'commesse', id: d.id, key: 'pagamenti', i: d.i, title: 'Scadenza di pagamento', fields: pagFields() });
@@ -1147,7 +1159,9 @@ A.incDel = async (d) => { if (!(await confirmBox('Eliminare questo incasso?', 'E
 function tabDocumenti(c) {
   const docs = D('documenti').filter((x) => x.commessaId === c.id).sort((a, b) => String(b.data).localeCompare(String(a.data)));
   const t = tbl([{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo) + '</b>' }, { h: 'Categoria', f: (x) => esc(catPath(x.categoriaId)) }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'File', f: (x) => fileLink(x.file) }], docs, { empty: 'Nessun documento collegato a questa commessa.', row: (x) => 'data-a="docEdit" data-id="' + esc(x.id) + '" data-col="documenti"' });
-  return card('Documenti della commessa', t, '<button class="btn p sm" data-a="docNew" data-commessa="' + esc(c.id) + '">+ Carica documento</button>');
+  const docsTec = (c.documentiAmm || []).filter((x) => TIPI_DOC_TEC.includes(x.tipo)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+  const docT = tbl(colDocComm, docsTec, { empty: 'Nessun documento caricato: progetti, valutazioni energetiche, bollette del cliente, schede tecniche dei materiali…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
+  return card('Documenti della commessa', t, '<button class="btn p sm" data-a="docNew" data-commessa="' + esc(c.id) + '">+ Carica documento</button>') + card('Progetti e documentazione tecnica', docT, '<button class="btn p sm" data-a="docTecNew" data-id="' + esc(c.id) + '">+ Documento</button>') + fotoCard(c, 'fotoSopralluogo', 'Foto sopralluogo') + fotoCard(c, 'fotoInstallazione', 'Foto installazione');
 }
 function tabSquadre(c) {
   const as = D('assegnazioni').filter((a) => a.commessaId === c.id).sort((a, b) => a.settimana.localeCompare(b.settimana));
@@ -1364,14 +1378,58 @@ A.scadPagato = async (d) => {
 A.goPagScaduti = () => { S.ftipo = 'PAGAMENTO'; go('scadenzario'); };
 
 /* ---------- clienti ---------- */
-let clienteFields = () => [{ k: 'ragioneSociale', l: 'Ragione sociale', req: true }, { k: 'piva', l: 'Partita IVA', half: true }, { k: 'referente', l: 'Referente', half: true }, { k: 'indirizzo', l: 'Indirizzo' }, { k: 'citta', l: 'Città', half: true }, { k: 'provincia', l: 'Provincia', half: true }, { k: 'telefono', l: 'Telefono', half: true }, { k: 'email', l: 'Email', half: true }, { k: 'pec', l: 'PEC' }, { k: 'note', l: 'Note', t: 'textarea' }];
+let clienteFields = () => [{ k: 'ragioneSociale', l: 'Ragione sociale', req: true }, { k: 'stato', l: 'Stato cliente', t: 'select', req: true, opts: TIPI_CLI_STATO.map((x) => [x[0], x[1]]), hint: 'Potenziale: puoi caricare offerte e preventivi. Acquisito: puoi creare e gestire le commesse.' }, { k: 'piva', l: 'Partita IVA', half: true }, { k: 'referente', l: 'Referente', half: true }, { k: 'indirizzo', l: 'Indirizzo' }, { k: 'citta', l: 'Città', half: true }, { k: 'provincia', l: 'Provincia', half: true }, { k: 'telefono', l: 'Telefono', half: true }, { k: 'email', l: 'Email', half: true }, { k: 'pec', l: 'PEC' }, { k: 'note', l: 'Note', t: 'textarea' }];
 function vClienti() {
-  const q = S.q.toLowerCase(), cs = D('clienti').filter((c) => !q || (c.ragioneSociale + ' ' + (c.citta || '') + ' ' + (c.piva || '')).toLowerCase().includes(q)).sort(byStr((x) => x.ragioneSociale));
-  const t = tbl([{ h: 'Cliente', f: (c) => '<b>' + esc(c.ragioneSociale) + '</b>' }, { h: 'P.IVA', f: (c) => esc(c.piva) }, { h: 'Città', f: (c) => esc(c.citta) }, { h: 'Referente', f: (c) => esc(c.referente) + '<div class="small muted">' + esc([c.telefono, c.email].filter(Boolean).join(' · ')) + '</div>' }, { h: 'Commesse', r: true, f: (c) => D('commesse').filter((x) => x.clienteId === c.id).length }], cs, { empty: 'Nessun cliente. Aggiungi il primo con “Nuovo cliente”.', row: (c) => 'data-a="cliEdit" data-id="' + esc(c.id) + '"' });
-  return pageHead('Clienti', 'Anagrafica clienti collegata alle commesse.', '<button class="btn p" data-a="cliNew">Nuovo cliente</button>') + '<div class="fbar"><input id="q" data-in="q" placeholder="Cerca cliente" aria-label="Cerca" value="' + esc(S.q) + '"></div><div class="card">' + t + '</div>';
+  const q = S.q.toLowerCase(), f = S.cfil || 'tutti';
+  const tutti = D('clienti'), nA = tutti.filter((c) => statoCli(c) === 'ACQUISITO').length, nP = tutti.length - nA;
+  const cs = tutti.filter((c) => (f === 'tutti' || statoCli(c) === f) && (!q || (c.ragioneSociale + ' ' + (c.citta || '') + ' ' + (c.piva || '')).toLowerCase().includes(q))).sort(byStr((x) => x.ragioneSociale));
+  const tabs = '<div class="tabs" role="tablist">' + [['tutti', 'Tutti (' + tutti.length + ')'], ['ACQUISITO', 'Acquisiti (' + nA + ')'], ['POTENZIALE', 'Potenziali (' + nP + ')']].map((t) => '<button class="tab' + (f === t[0] ? ' on' : '') + '" data-a="cfil" data-t="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
+  const t = tbl([{ h: 'Cliente', f: (c) => '<b>' + esc(c.ragioneSociale) + '</b>' }, { h: 'Stato', f: (c) => stBadge(TIPI_CLI_STATO, statoCli(c)) }, { h: 'Città', f: (c) => esc(c.citta) }, { h: 'Referente', f: (c) => esc(c.referente) + '<div class="small muted">' + esc([c.telefono, c.email].filter(Boolean).join(' · ')) + '</div>' }, { h: 'Commesse', r: true, f: (c) => D('commesse').filter((x) => x.clienteId === c.id).length || '—' }, { h: 'Offerte', r: true, f: (c) => (c.offerte || []).length || '—' }], cs, { empty: 'Nessun cliente in questo elenco.', row: (c) => 'data-a="goRef" data-r="cliente" data-id="' + esc(c.id) + '"' });
+  return pageHead('Clienti', 'Clienti potenziali (offerte e preventivi) e acquisiti (commesse).', '<button class="btn p" data-a="cliNew">Nuovo cliente</button>') + tabs + '<div class="fbar"><input id="q" data-in="q" placeholder="Cerca cliente" aria-label="Cerca" value="' + esc(S.q) + '"></div><div class="card">' + t + '</div>';
 }
-A.cliNew = () => openForm({ title: 'Nuovo cliente', fields: clienteFields(), folder: (out) => ['Clienti', out.ragioneSociale || 'Nuovo cliente'], onSave: (v) => put('clienti', newId('clienti'), v) });
-A.cliEdit = (d) => { const c = G('clienti', d.id), n = D('commesse').filter((x) => x.clienteId === c.id).length; openForm({ title: 'Cliente', fields: clienteFields(), values: c, info: n ? n + ' commesse collegate' : '', folder: ['Clienti', c.ragioneSociale], onSave: (v) => patch('clienti', c.id, v), onDelete: n || !S.admin ? null : () => remove('clienti', c.id) }); };
+A.cfil = (d) => { S.cfil = d.t; queueRender(); };
+const offFields = () => [{ k: 'titolo', l: 'Oggetto dell’offerta', req: true }, { k: 'data', l: 'Data', t: 'date', half: true }, { k: 'importo', l: 'Importo (€)', t: 'number', half: true }, { k: 'esito', l: 'Esito', t: 'select', half: true, opts: ESITI_OFF }, { k: 'file', l: 'Offerta / preventivo (file)', t: 'file' }, { k: 'note', l: 'Note', t: 'textarea' }];
+function offForm(cid, oid) {
+  const c = G('clienti', cid); if (!c) return;
+  const cur = oid ? (c.offerte || []).find((x) => x.id === oid) : { data: today(), esito: 'INVIATA' }; if (!cur) return;
+  const salva = async (arr) => { const doc2 = clone(G('clienti', cid)); doc2.offerte = arr; applyLocalWrite('clienti', cid, doc2); await patch('clienti', cid, { offerte: arr }); };
+  openForm({
+    title: 'Offerta o preventivo', fields: offFields(), values: cur, folder: ['Clienti', c.ragioneSociale, 'Offerte e preventivi'],
+    onSave: async (v) => {
+      const arr = clone(G('clienti', cid).offerte || []); let item = Object.assign({}, cur, v);
+      if (oid) { const i = arr.findIndex((x) => x.id === oid); arr[i] = item; } else { item.id = uid(); arr.push(item); }
+      await salva(arr);
+      if (item.esito === 'ACCETTATA' && !item.commessaId) setTimeout(() => offAccettata(cid, item.id), 300);
+    },
+    onDelete: oid ? async () => { await salva(clone(G('clienti', cid).offerte || []).filter((x) => x.id !== oid)); } : null
+  });
+}
+async function offAccettata(cid, oid) {
+  const c = G('clienti', cid), o = c && (c.offerte || []).find((x) => x.id === oid); if (!o) return;
+  if (!(await confirmBox('Offerta accettata. Segno “' + c.ragioneSociale + '” come cliente acquisito e creo la commessa con i dati dell’offerta?', 'Crea commessa'))) return;
+  if (statoCli(c) !== 'ACQUISITO') { const d2 = clone(c); d2.stato = 'ACQUISITO'; applyLocalWrite('clienti', cid, d2); await patch('clienti', cid, { stato: 'ACQUISITO' }); }
+  nuovaCommessa({ clienteId: cid, titolo: o.titolo, importo: o.importo, stato: 'ACQUISITA', _docs: o.file ? [{ id: uid(), tipo: 'OFFERTA_ACCETTATA', titolo: o.titolo, data: o.data || today(), file: o.file }] : undefined }, async (id) => {
+    const arr = clone(G('clienti', cid).offerte || []).map((x) => (x.id === oid ? Object.assign({}, x, { commessaId: id }) : x));
+    const doc2 = clone(G('clienti', cid)); doc2.offerte = arr; applyLocalWrite('clienti', cid, doc2); await patch('clienti', cid, { offerte: arr });
+  });
+}
+A.offNew = (d) => offForm(d.id, null);
+A.offEdit = (d) => offForm(d.id, d.x);
+A.cliAcq = async (d) => { const c = G('clienti', d.id); if (!c) return; const d2 = clone(c); d2.stato = 'ACQUISITO'; applyLocalWrite('clienti', c.id, d2); await patch('clienti', c.id, { stato: 'ACQUISITO' }); toast('Cliente segnato come acquisito: ora puoi creare le sue commesse.'); };
+function vCliente() {
+  const c = G('clienti', S.id);
+  if (!c) return '<div class="empty">Cliente non trovato. <button class="lnk" data-a="go" data-r="clienti">Torna ai clienti</button></div>';
+  const st = statoCli(c), acq = st === 'ACQUISITO', id = esc(c.id);
+  const com = D('commesse').filter((x) => x.clienteId === c.id).sort((a, b) => String(b.codice).localeCompare(String(a.codice)));
+  const tCom = tbl([{ h: 'Codice', f: (x) => '<span class="mono">' + esc(x.codice) + '</span>' }, { h: 'Lavori', f: (x) => '<b>' + esc(x.titolo) + '</b>' }, { h: 'Stato', f: (x) => stBadge(STATI_COMMESSA, x.stato) }, { h: 'Importo', r: true, f: (x) => eur(x.importo) }], com, { empty: 'Nessuna commessa. Creala con “+ Nuova commessa”.', row: (x) => 'data-a="goRef" data-r="commessa" data-id="' + esc(x.id) + '" data-tab="panoramica"' });
+  const off = (c.offerte || []).slice().sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+  const tOff = tbl([{ h: 'Offerta', f: (x) => '<b>' + esc(x.titolo) + '</b>' + (x.note ? '<div class="small muted">' + esc(x.note) + '</div>' : '') }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Importo', r: true, f: (x) => x.importo ? eur(x.importo) : '' }, { h: 'Esito', f: (x) => stBadge(ESITI_OFF, x.esito || 'INVIATA') + (x.commessaId && G('commesse', x.commessaId) ? '<div class="small muted">→ commessa ' + esc(G('commesse', x.commessaId).codice) + '</div>' : '') }, { h: 'File', f: (x) => fileLink(x.file) }], off, { empty: 'Nessuna offerta. Carica preventivi e offerte inviate a questo cliente.', row: (x) => 'data-a="offEdit" data-id="' + id + '" data-x="' + esc(x.id) + '"' });
+  const dett = [['Referente', c.referente], ['Telefono', c.telefono], ['Email', c.email], ['PEC', c.pec], ['P.IVA', c.piva], ['Indirizzo', [c.indirizzo, c.citta, c.provincia].filter(Boolean).join(', ')], ['Note', c.note]].filter((r) => r[1]).map((r) => '<div class="blk"><div style="flex:1"><div class="small muted">' + r[0] + '</div>' + esc(r[1]) + '</div></div>').join('') || '<div class="empty">Nessun dato anagrafico.</div>';
+  const azioni = '<div class="row">' + (acq ? '<button class="btn p" data-a="newCCli" data-id="' + id + '">+ Nuova commessa</button>' : '<button class="btn p" data-a="cliAcq" data-id="' + id + '">Segna come acquisito</button>') + '<button class="btn" data-a="cliEdit" data-id="' + id + '">Modifica</button></div>';
+  return '<div class="hd"><div><button class="lnk" data-a="go" data-r="clienti">← Clienti</button><h1 style="margin-top:8px">' + esc(c.ragioneSociale) + ' ' + stBadge(TIPI_CLI_STATO, st) + '</h1><p class="sub">' + (acq ? com.length + (com.length === 1 ? ' commessa' : ' commesse') : 'Cliente potenziale: carica le offerte; quando sono accettate diventa acquisito') + '</p></div>' + azioni + '</div><div class="stack">' + card('Anagrafica', dett) + (acq ? card('Commesse (' + com.length + ')', tCom, '<button class="btn p sm" data-a="newCCli" data-id="' + id + '">+ Nuova commessa</button>') : '') + card('Offerte e preventivi', tOff, '<button class="btn p sm" data-a="offNew" data-id="' + id + '">+ Offerta</button>') + '</div>';
+}
+A.cliNew = () => openForm({ title: 'Nuovo cliente', fields: clienteFields(), values: { stato: 'POTENZIALE' }, folder: (out) => ['Clienti', out.ragioneSociale || 'Nuovo cliente'], onSave: (v) => put('clienti', newId('clienti'), v) });
+A.cliEdit = (d) => { const c = G('clienti', d.id), n = D('commesse').filter((x) => x.clienteId === c.id).length; openForm({ title: 'Cliente', fields: clienteFields(), values: Object.assign({}, c, { stato: statoCli(c) }), info: n ? n + ' commesse collegate' : '', folder: ['Clienti', c.ragioneSociale], onSave: (v) => patch('clienti', c.id, v), onDelete: n || !S.admin ? null : () => remove('clienti', c.id) }); };
 
 /* ---------- personale ---------- */
 const abInfo = (d) => { let ok = 0, sc = 0, sca = 0; (d.abilitazioni || []).filter((a) => !a.archiviato).forEach((a) => { if (!a.dataScadenza || a.dataScadenza >= today() && diff(a.dataScadenza, today()) > 30) ok++; else if (a.dataScadenza >= today()) sc++; else sca++; }); return { ok, sc, sca }; };
@@ -2130,7 +2188,7 @@ const ENT = [['commesse', 'Commesse'], ['clienti', 'Clienti'], ['dipendenti', 'D
 const extraDefs = (ent) => (CFG('campi')[ent] || []);
 const extraFields = (ent) => campiToFields(extraDefs(ent));
 const extraCard = (ent, obj) => { const defs = extraDefs(ent); if (!defs.length || !obj) return ''; return '<div class="stack" style="margin-top:16px">' + card('Campi aggiuntivi', '<div class="kv">' + defs.map((c) => kv(c.l, valCampo(c, obj[c.k]))).join('') + '</div>') + '</div>'; };
-{ const b = commessaFields; commessaFields = () => b().concat(extraFields('commesse')); }
+{ const b = commessaFields; commessaFields = (...a) => b(...a).concat(extraFields('commesse')); }
 { const b = clienteFields; clienteFields = () => b().concat(extraFields('clienti')); }
 { const b = dipFields; dipFields = () => b().concat(extraFields('dipendenti')); }
 { const b = mezzoFields; mezzoFields = () => b().concat(extraFields('mezzi')); }
