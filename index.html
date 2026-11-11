@@ -687,12 +687,12 @@ function eventi() {
   const ev = [];
   const push = (data, tipo, titolo, sub, ref) => { if (data) ev.push({ data, tipo, titolo, sub: sub || '', ref: ref || null }); };
   D('dipendenti').forEach((d) => {
-    (d.abilitazioni || []).forEach((a) => push(a.dataScadenza, 'FORMAZIONE', abLabel(a.tipo), nomeD(d), { r: 'dipendente', id: d.id }));
+    (d.abilitazioni || []).filter((a) => !a.archiviato).forEach((a) => push(a.dataScadenza, 'FORMAZIONE', abLabel(a.tipo), nomeD(d), { r: 'dipendente', id: d.id }));
     (d.documenti || []).forEach((x) => push(x.scadenza, 'PERSONALE', x.titolo || lab(TIPI_DOC_DIP, x.tipo), nomeD(d), { r: 'dipendente', id: d.id }));
   });
   D('docAzienda').forEach((x) => push(x.dataScadenza, 'AZIENDA', x.titolo || lab(TIPI_DOC_AZ, x.tipo), x.ente || '', { r: 'azienda', tab: 'documenti' }));
   D('assicurazioni').forEach((x) => push(x.dataScadenza, 'ASSICURAZIONE', lab(TIPI_ASS, x.tipo), x.compagnia || '', { r: 'azienda', tab: 'assicurazioni' }));
-  D('mezzi').forEach((m) => {
+  D('mezzi').filter((m) => m.attivo !== false).forEach((m) => {
     /* revisione e bollo arrivano già da qui sotto (sono due dei tipi di controllo), presi
        dall'ultimo controllo di quel tipo caricato: niente più campo scadenza separato da tenere
        aggiornato a mano sulla scheda del mezzo. */
@@ -1374,7 +1374,7 @@ A.cliNew = () => openForm({ title: 'Nuovo cliente', fields: clienteFields(), fol
 A.cliEdit = (d) => { const c = G('clienti', d.id), n = D('commesse').filter((x) => x.clienteId === c.id).length; openForm({ title: 'Cliente', fields: clienteFields(), values: c, info: n ? n + ' commesse collegate' : '', folder: ['Clienti', c.ragioneSociale], onSave: (v) => patch('clienti', c.id, v), onDelete: n || !S.admin ? null : () => remove('clienti', c.id) }); };
 
 /* ---------- personale ---------- */
-const abInfo = (d) => { let ok = 0, sc = 0, sca = 0; (d.abilitazioni || []).forEach((a) => { if (!a.dataScadenza || a.dataScadenza >= today() && diff(a.dataScadenza, today()) > 30) ok++; else if (a.dataScadenza >= today()) sc++; else sca++; }); return { ok, sc, sca }; };
+const abInfo = (d) => { let ok = 0, sc = 0, sca = 0; (d.abilitazioni || []).filter((a) => !a.archiviato).forEach((a) => { if (!a.dataScadenza || a.dataScadenza >= today() && diff(a.dataScadenza, today()) > 30) ok++; else if (a.dataScadenza >= today()) sc++; else sca++; }); return { ok, sc, sca }; };
 function vPersonale() {
   const tab = S.ptab || 'dipendenti';
   const tabs = '<div class="tabs" role="tablist">' + [['dipendenti', 'Dipendenti'], ['squadre', 'Squadre'], ['formazione', 'Formazione']].map((t) => '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-a="ptab" data-t="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
@@ -1402,9 +1402,11 @@ A.sqEdit = (d) => { const s = G('squadre', d.id); openForm({ title: 'Squadra', f
 function vDipendente() {
   const d = G('dipendenti', S.id);
   if (!d) return '<div class="empty">Dipendente non trovato. <button class="lnk" data-a="go" data-r="personale">Torna a Personale</button></div>';
-  const t = tbl([{ h: 'Corso o abilitazione', f: (a) => '<b>' + esc(abLabel(a.tipo)) + '</b>' + (a.descrizione ? '<div class="small muted">' + esc(a.descrizione) + '</div>' : '') }, { h: 'Conseguito', f: (a) => esc(fmtD(a.dataConseguimento)) }, { h: 'Scadenza', f: (a) => a.dataScadenza ? scadBadge(a.dataScadenza) : '<span class="muted">Non scade</span>' }, { h: 'Attestato', f: (a) => fileLink(a.file) }], (d.abilitazioni || []).slice().sort((a, b) => String(a.dataScadenza || '9999').localeCompare(String(b.dataScadenza || '9999'))), { empty: 'Nessuna abilitazione registrata.', row: (a) => 'data-a="abEdit" data-id="' + esc(d.id) + '" data-x="' + esc(a.id) + '"' });
+  const t = tbl([{ h: 'Corso o abilitazione', f: (a) => '<b>' + esc(abLabel(a.tipo)) + '</b>' + (a.descrizione ? '<div class="small muted">' + esc(a.descrizione) + '</div>' : '') }, { h: 'Conseguito', f: (a) => esc(fmtD(a.dataConseguimento)) }, { h: 'Scadenza', f: (a) => a.dataScadenza ? scadBadge(a.dataScadenza) : '<span class="muted">Non scade</span>' }, { h: 'Attestato', f: (a) => fileLink(a.file) }], (d.abilitazioni || []).filter((a) => !a.archiviato).sort((a, b) => String(a.dataScadenza || '9999').localeCompare(String(b.dataScadenza || '9999'))), { empty: 'Nessuna abilitazione registrata.', row: (a) => 'data-a="abEdit" data-id="' + esc(d.id) + '" data-x="' + esc(a.id) + '"' });
+  const vecchi = (d.abilitazioni || []).filter((a) => a.archiviato).sort((a, b) => String(b.dataConseguimento || b.dataScadenza || '').localeCompare(String(a.dataConseguimento || a.dataScadenza || '')));
+  const tVecchi = vecchi.length ? tbl([{ h: 'Corso o abilitazione', f: (a) => '<b>' + esc(abLabel(a.tipo)) + '</b>' + (a.descrizione ? '<div class="small muted">' + esc(a.descrizione) + '</div>' : '') }, { h: 'Conseguito', f: (a) => esc(fmtD(a.dataConseguimento)) }, { h: 'Scadenza', f: (a) => esc(fmtD(a.dataScadenza)) }, { h: 'Attestato (in Scaduti)', f: (a) => fileLink(a.file) }], vecchi, { row: (a) => 'data-a="abEdit" data-id="' + esc(d.id) + '" data-x="' + esc(a.id) + '"' }) : '';
   const doc = tbl([{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo || lab(TIPI_DOC_DIP, x.tipo)) + '</b><div class="small muted">' + esc(lab(TIPI_DOC_DIP, x.tipo)) + '</div>' }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Scadenza', f: (x) => x.scadenza ? scadBadge(x.scadenza) : '<span class="muted">Non scade</span>' }, { h: 'File', f: (x) => fileLink(x.file) }], (d.documenti || []).slice().sort((a, b) => String(a.scadenza || '9999').localeCompare(String(b.scadenza || '9999'))), { empty: 'Nessun documento caricato.', row: (x) => 'data-a="docDipEdit" data-id="' + esc(d.id) + '" data-x="' + esc(x.id) + '"' });
-  return '<div class="hd"><div><button class="lnk" data-a="go" data-r="personale">← Personale</button><h1 style="margin-top:8px">' + esc(nomeD(d)) + '</h1><p class="sub">' + esc(d.mansione || '') + (squadraDi(d.id) ? ' · ' + esc(squadraDi(d.id)) : '') + '</p></div><div class="row"><button class="btn" data-a="dipEdit" data-id="' + esc(d.id) + '">Modifica</button></div></div>' + card('Formazione e abilitazioni', t, '<button class="btn p sm" data-a="abNew" data-id="' + esc(d.id) + '">+ Aggiungi</button>') + card('Documenti personali', doc, '<button class="btn p sm" data-a="docDipNew" data-id="' + esc(d.id) + '">+ Aggiungi</button>');
+  return '<div class="hd"><div><button class="lnk" data-a="go" data-r="personale">← Personale</button><h1 style="margin-top:8px">' + esc(nomeD(d)) + '</h1><p class="sub">' + esc(d.mansione || '') + (squadraDi(d.id) ? ' · ' + esc(squadraDi(d.id)) : '') + '</p></div><div class="row"><button class="btn" data-a="dipEdit" data-id="' + esc(d.id) + '">Modifica</button></div></div>' + card('Formazione e abilitazioni', t, '<button class="btn p sm" data-a="abNew" data-id="' + esc(d.id) + '">+ Aggiungi</button>') + (vecchi.length ? card('Archivio corsi vecchi (' + vecchi.length + ')', tVecchi + '<div class="hint">Sostituiti da un corso più recente dello stesso tipo: i file sono nella cartella Scaduti su Drive.</div>') : '') + card('Documenti personali', doc, '<button class="btn p sm" data-a="docDipNew" data-id="' + esc(d.id) + '">+ Aggiungi</button>');
 }
 A.dipEdit = (d) => { const x = G('dipendenti', d.id); openForm({ title: 'Dipendente', fields: dipFields(), values: x, folder: ['Personale', nomeD(x)], onSave: (v) => patch('dipendenti', x.id, v), onDelete: S.admin ? async () => { await remove('dipendenti', x.id); go('personale'); } : null }); };
 const abFields = () => [{ k: 'tipo', l: 'Corso o abilitazione', t: 'select', req: true, opts: TIPI_AB.map((x) => [x[0], x[1]]) }, { k: 'descrizione', l: 'Dettaglio (ente, livello…)' }, { k: 'dataConseguimento', l: 'Data conseguimento', t: 'date', half: true }, { k: 'dataScadenza', l: 'Scadenza', t: 'date', half: true, hint: 'Se la lasci vuota viene proposta in base alla validità indicativa del corso. Verifica sempre l\u2019attestato.' }, { k: 'file', l: 'Attestato', t: 'file' }];
@@ -1483,11 +1485,13 @@ function aMezzi(kind) {
   const ultCtl = (m) => { const c = ult(m); return c ? stBadge(ESITI, c.esito) + '<div class="small muted">' + esc(lab(TIPI_CONTROLLO, c.tipo)) + ' · ' + esc(fmtD(c.data)) + '</div>' : '<span class="muted">—</span>'; };
   const rowOpts = { row: (m) => 'data-a="goRef" data-r="mezzo" data-id="' + esc(m.id) + '"' };
   const rows = D('mezzi').sort(byStr((x) => x.descrizione));
-  const veicoli = rows.filter((m) => m.tipo !== 'ATTREZZATURA'), attrezzi = rows.filter((m) => m.tipo === 'ATTREZZATURA');
+  const veicoli = rows.filter((m) => m.tipo !== 'ATTREZZATURA' && m.attivo !== false), attrezzi = rows.filter((m) => m.tipo === 'ATTREZZATURA' && m.attivo !== false);
+  const fuori = rows.filter((m) => m.attivo === false && (kind === 'att' ? m.tipo === 'ATTREZZATURA' : m.tipo !== 'ATTREZZATURA'));
+  const tFuori = fuori.length ? card('Fuori servizio — archivio (' + fuori.length + ')', tbl([{ h: kind === 'att' ? 'Attrezzatura' : 'Mezzo', f: nomeM }, { h: 'Assegnato a', f: assegn }, { h: 'Ultimo controllo', f: ultCtl }], fuori, rowOpts) + '<div class="hint">I file di questi sono nella cartella Scaduti del mezzo su Drive; le scadenze non compaiono più nel calendario.</div>') : '';
   const tMezzi = tbl([{ h: 'Mezzo', f: nomeM }, { h: 'Assegnato a', f: assegn }, { h: 'Assicurazione', f: (m) => { const a = D('assicurazioni').filter((x) => x.mezzoId === m.id).sort((p, q) => q.dataScadenza.localeCompare(p.dataScadenza))[0]; return a ? scadBadge(a.dataScadenza) : '<span class="muted">—</span>'; } }, { h: 'Libretto', f: (m) => fileLink(m.libretto) }, { h: 'Revisione', f: (m) => { const s = scadenzaControllo(m, 'REVISIONE'); return s ? scadBadge(s) : '<span class="muted">—</span>'; } }, { h: 'Bollo', f: (m) => { const s = scadenzaControllo(m, 'BOLLO'); return s ? scadBadge(s) : '<span class="muted">—</span>'; } }, { h: 'Ultimo controllo', f: ultCtl }], veicoli, Object.assign({ empty: 'Nessun mezzo. Aggiungi furgoni, cestelli, autocarri…' }, rowOpts));
   const tAttr = tbl([{ h: 'Attrezzatura', f: nomeM }, { h: 'Assegnato a', f: assegn }, { h: 'Prossima verifica', f: (m) => { const c = (m.controlli || []).filter((x) => x.prossimaScadenza).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))[0]; return c ? scadBadge(c.prossimaScadenza) : '<span class="muted">—</span>'; } }, { h: 'Ultimo controllo', f: ultCtl }], attrezzi, Object.assign({ empty: 'Nessuna attrezzatura.' }, rowOpts));
-  if (kind === 'att') return cardScaduti((e) => e.tipo === 'MEZZO') + card('Attrezzature', tAttr, '<button class="btn p sm" data-a="attrNew">+ Attrezzatura</button>');
-  return cardScaduti((e) => e.tipo === 'MEZZO') + card('Mezzi', tMezzi, '<button class="btn p sm" data-a="mezNew">+ Mezzo</button>');
+  if (kind === 'att') return cardScaduti((e) => e.tipo === 'MEZZO') + card('Attrezzature', tAttr, '<button class="btn p sm" data-a="attrNew">+ Attrezzatura</button>') + tFuori;
+  return cardScaduti((e) => e.tipo === 'MEZZO') + card('Mezzi', tMezzi, '<button class="btn p sm" data-a="mezNew">+ Mezzo</button>') + tFuori;
 }
 const mezzoCartella = (tipo) => tipo === 'ATTREZZATURA' ? 'Attrezzature' : 'Mezzi';
 A.mezNew = () => openForm({ title: 'Nuovo mezzo', fields: mezzoFields(), values: { attivo: true }, folder: (out) => ['Azienda', 'Mezzi e attrezzature', mezzoCartella(out.tipo), out.descrizione || 'Nuovo mezzo'], onSave: async (v) => { const id = newId('mezzi'); await put('mezzi', id, Object.assign({}, v, { controlli: [] })); go('mezzo', id); } });
@@ -1512,7 +1516,7 @@ function vMezzo() {
   const sortD = (arr) => (arr || []).slice().sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
   const pol = polizzeMezzo(m), man = m.manutenzioni || [], sin = m.sinistri || [], mul = m.multe || [];
   const polTab = tbl([{ h: 'Polizza', f: (x) => '<b>' + esc(lab(TIPI_ASS, x.tipo)) + '</b><div class="small muted">' + esc(x.compagnia) + (x.numeroPolizza ? ' · ' + esc(x.numeroPolizza) : '') + '</div>' }, { h: 'Scadenza', f: (x) => scadBadge(x.dataScadenza) }, { h: 'Premio', r: true, f: (x) => x.premio ? eur(x.premio) : '' }, { h: 'Polizza (file)', f: (x) => fileLink(x.file) }, { h: 'Quietanza', f: (x) => fileLink(x.quietanza) }], pol, { empty: 'Nessuna polizza collegata a questo mezzo.', row: (x) => 'data-a="assEdit" data-id="' + esc(x.id) + '"' });
-  const ctlRows = (tipi, inv) => sortD(m.controlli).filter((c) => inv ? !tipi.includes(c.tipo) : tipi.includes(c.tipo));
+  const ctlRows = (tipi, inv) => sortD(m.controlli).filter((c) => !c.archiviato).filter((c) => inv ? !tipi.includes(c.tipo) : tipi.includes(c.tipo));
   const ctlT = (rows, empty) => tbl([{ h: 'Controllo', f: (c) => '<b>' + esc(lab(TIPI_CONTROLLO, c.tipo)) + '</b>' }, { h: 'Data', f: (c) => esc(fmtD(c.data)) }, { h: 'Esito', f: (c) => stBadge(ESITI, c.esito) }, { h: 'Eseguito da', f: (c) => esc(c.eseguitoDa) }, { h: 'Prossima scadenza', f: (c) => scadBadge(c.prossimaScadenza) }, { h: 'Verbale', f: (c) => fileLink(c.file) }], rows, { empty, row: (c) => 'data-a="ctlEdit" data-id="' + id + '" data-x="' + esc(c.id) + '"' });
   const ctlBtn = (t) => '<button class="btn p sm" data-a="ctlNew" data-id="' + id + '" data-tipo="' + t + '">+ ' + (t === 'REVISIONE' ? 'Revisione' : t === 'BOLLO' ? 'Bollo' : 'Controllo') + '</button>';
   const manT = tbl([{ h: 'Intervento', f: (x) => '<b>' + esc(lab(TIPI_MAN, x.tipo)) + '</b>' + (x.descrizione ? '<div class="small muted">' + esc(x.descrizione) + '</div>' : '') }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Km', r: true, f: (x) => x.km ? esc(x.km) : '' }, { h: 'Officina', f: (x) => esc(x.officina) }, { h: 'Importo', r: true, f: (x) => x.importo ? eur(x.importo) : '' }, { h: 'Prossimo entro', f: (x) => x.prossimaScadenza ? scadBadge(x.prossimaScadenza) : '' }, { h: 'Fattura', f: (x) => fileLink(x.file) }], sortD(man), { empty: 'Nessun tagliando o manutenzione registrati.', row: (x) => 'data-a="manEdit" data-id="' + id + '" data-x="' + esc(x.id) + '"' });
@@ -1520,7 +1524,7 @@ function vMezzo() {
   const mulT = tbl([{ h: 'Multa', f: (x) => '<b>' + esc(fmtD(x.data)) + '</b><div class="small muted">' + esc(x.motivo || x.luogo || '') + (x.verbale ? ' · verbale ' + esc(x.verbale) : '') + '</div>' }, { h: 'Conducente', f: (x) => { const d = x.conducenteId && G('dipendenti', x.conducenteId); return esc(d ? nomeD(d) : ''); } }, { h: 'Stato', f: (x) => stBadge(STATI_MULTA, x.stato || 'DA_PAGARE') }, { h: 'Importo', r: true, f: (x) => x.importo ? eur(x.importo) : '' }, { h: 'Pagare entro', f: (x) => x.stato === 'PAGATA' || !x.scadenzaPagamento ? '' : scadBadge(x.scadenzaPagamento) }, { h: 'Verbale', f: (x) => fileLink(x.file) }, { h: 'Ricevuta', f: (x) => fileLink(x.ricevuta) }], sortD(mul), { empty: 'Nessuna multa registrata.', row: (x) => 'data-a="mulEdit" data-id="' + id + '" data-x="' + esc(x.id) + '"' });
   let body = '';
   if (tab === 'rev' && isAtt) body = card('Verifiche e controlli periodici', ctlT(ctlRows([], true), 'Nessuna verifica registrata.'), ctlBtn('ALTRO').replace('+ Controllo', '+ Verifica'));
-  else if (tab === 'rev') body = card('Revisioni e bollo', ctlT(ctlRows(['REVISIONE', 'BOLLO']), 'Nessuna revisione o bollo registrati.'), ctlBtn('REVISIONE') + ctlBtn('BOLLO'));
+  else if (tab === 'rev') { const vecchie = sortD(m.controlli).filter((c) => c.archiviato && (c.tipo === 'REVISIONE' || c.tipo === 'BOLLO')); body = card('Revisioni e bollo', ctlT(ctlRows(['REVISIONE', 'BOLLO']), 'Nessuna revisione o bollo registrati.'), ctlBtn('REVISIONE') + ctlBtn('BOLLO')) + (vecchie.length ? card('Archivio revisioni e bolli vecchi (' + vecchie.length + ')', ctlT(vecchie, ''), '') + '<div class="hint">Sostituiti da uno più recente: i file sono nella cartella Scaduti del mezzo su Drive.</div>' : ''); }
   else if (tab === 'ass') body = card('Assicurazioni e quietanze', polTab, '<button class="btn p sm" data-a="assNewMezzo" data-id="' + id + '">+ Polizza</button>') + '<div class="hint">Quietanza e polizza si caricano aprendo la riga. La scadenza va in automatico nello scadenzario.</div>';
   else if (tab === 'man') body = card('Tagliandi e manutenzioni (anche straordinarie)', manT, '<button class="btn p sm" data-a="manNew" data-id="' + id + '">+ Intervento</button>') + (isAtt ? '' : card('Altri controlli e verifiche', ctlT(ctlRows(['REVISIONE', 'BOLLO'], true), 'Nessun altro controllo.'), ctlBtn('ALTRO')));
   else if (tab === 'sin') body = card('Sinistri', sinT, '<button class="btn p sm" data-a="sinNew" data-id="' + id + '">+ Sinistro</button>');
@@ -2065,7 +2069,7 @@ async function runSync() {
       const w = assegnateDi(a.dipendenteId), s = settimanaDi(a.dipendenteId), p = {};
       if (JSON.stringify(w) !== JSON.stringify(a.assegnate || [])) p.assegnate = w;
       if (JSON.stringify(s) !== JSON.stringify(a.settimana || [])) p.settimana = s;
-      const dip = G('dipendenti', a.dipendenteId), form = (dip && dip.abilitazioni) || [], docs = (dip && dip.documenti) || [];
+      const dip = G('dipendenti', a.dipendenteId), form = ((dip && dip.abilitazioni) || []).filter((a) => !a.archiviato), docs = (dip && dip.documenti) || [];
       if (JSON.stringify(form) !== JSON.stringify(a.formazione || [])) p.formazione = form;
       if (JSON.stringify(docs) !== JSON.stringify(a.documentiPersonali || [])) p.documentiPersonali = docs;
       const pl = planningSnapshotDi(a.dipendenteId);
@@ -3147,6 +3151,54 @@ async function tryResume() {
 }
 
 /* ---------- avvio ---------- */
+/* archivio automatico (solo amministratore, in sottofondo): sposta nelle cartelle "Scaduti" di Drive
+   i file dei corsi vecchi del personale (sostituiti da uno più recente dello stesso tipo), delle
+   vecchie revisioni e bolli dei mezzi, e di tutto ciò che riguarda un mezzo tolto dal servizio.
+   Non cancella nulla: i record restano nell'app, nella sezione "Archivio". */
+let archSweeping = false;
+const archTried = new Set();
+async function sweepArchivio() {
+  if (!S.admin || !db || archSweeping || !S.loaded.dipendenti || !S.loaded.mezzi || !S.loaded.assicurazioni) return;
+  archSweeping = true; let n = 0;
+  const vecchiDi = (arr, ok, chiave) => {
+    const best = {};
+    (arr || []).forEach((a) => { if (a.archiviato || !ok(a)) return; const k = chiave(a); if (!best[a.tipo] || k > best[a.tipo]) best[a.tipo] = k; });
+    return (arr || []).filter((a) => !a.archiviato && ok(a) && chiave(a) < best[a.tipo]);
+  };
+  const sposta = async (f, path) => { if (f && f.id) { await archiveDriveFile(f.id, path); n++; } };
+  try {
+    for (const d of D('dipendenti')) {
+      const vecchi = vecchiDi(d.abilitazioni, (a) => a.tipo !== 'ALTRO', (a) => a.dataConseguimento || a.dataScadenza || '').filter((a) => !archTried.has(a.id));
+      if (!vecchi.length) continue;
+      vecchi.forEach((a) => archTried.add(a.id));
+      for (const a of vecchi) await sposta(a.file, ['Personale', nomeD(d), 'Formazione']);
+      const doc2 = clone(G('dipendenti', d.id)); const ids = vecchi.map((a) => a.id);
+      doc2.abilitazioni = (doc2.abilitazioni || []).map((a) => (ids.includes(a.id) ? Object.assign({}, a, { archiviato: true }) : a));
+      applyLocalWrite('dipendenti', d.id, doc2); await patch('dipendenti', d.id, { abilitazioni: doc2.abilitazioni });
+    }
+    for (const m of D('mezzi')) {
+      const vecchi = vecchiDi(m.controlli, (c) => c.tipo === 'REVISIONE' || c.tipo === 'BOLLO', (c) => c.data || '').filter((c) => !archTried.has(c.id));
+      if (vecchi.length) {
+        vecchi.forEach((c) => archTried.add(c.id));
+        for (const c of vecchi) await sposta(c.file, mezzoBase(m).concat('Controlli'));
+        const doc2 = clone(G('mezzi', m.id)); const ids = vecchi.map((c) => c.id);
+        doc2.controlli = (doc2.controlli || []).map((c) => (ids.includes(c.id) ? Object.assign({}, c, { archiviato: true }) : c));
+        applyLocalWrite('mezzi', m.id, doc2); await patch('mezzi', m.id, { controlli: doc2.controlli });
+      }
+      const mm = G('mezzi', m.id) || m;
+      if (mm.attivo === false && !mm.fileArchiviati && !archTried.has('m' + m.id)) {
+        archTried.add('m' + m.id);
+        const files = [mm.libretto].concat((mm.controlli || []).map((c) => c.file), (mm.manutenzioni || []).map((c) => c.file), (mm.sinistri || []).map((c) => c.file), (mm.multe || []).reduce((t, c) => t.concat([c.file, c.ricevuta]), []), D('assicurazioni').filter((x) => x.mezzoId === mm.id).reduce((t, x) => t.concat([x.file, x.quietanza]), []));
+        for (const f of files) await sposta(f, mezzoBase(mm));
+        await patch('mezzi', m.id, { fileArchiviati: true, archiviatoIl: today() });
+      } else if (mm.attivo !== false && mm.fileArchiviati) {
+        archTried.delete('m' + m.id); await patch('mezzi', m.id, { fileArchiviati: false });
+      }
+    }
+    if (n) toast('Archiviati ' + n + ' file vecchi nelle cartelle Scaduti su Drive.');
+  } catch (e) { /* riprova al prossimo aggiornamento dei dati */ }
+  finally { archSweeping = false; }
+}
 function subscribe(col) {
   db.collection(col).onSnapshot((snap) => {
     const m = {};
@@ -3157,6 +3209,7 @@ function subscribe(col) {
     if (col === 'categorie' || col === 'impostazioni') seedCategorieDefault();
     if (col === 'tipiLavoro' || col === 'impostazioni' || col === 'commesse') seedTipiLavoroDefault();
     if (col === 'mezzi' || col === 'impostazioni') migraScadenzeMezziDaiCampi();
+    if (col === 'mezzi' || col === 'dipendenti' || col === 'assicurazioni') setTimeout(sweepArchivio, 1500);
   }, (err) => { console.warn('db', col, err); S.data[col] = S.data[col] || {}; S.loaded[col] = true; queueRender(); });
 }
 /* la prima volta che l'amministratore arriva su Documentale senza aver ancora creato nessuna
