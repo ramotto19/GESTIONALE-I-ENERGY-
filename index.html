@@ -188,7 +188,7 @@ const sum = (a, f) => a.reduce((t, x) => t + (Number(f ? f(x) : x) || 0), 0);
 const byStr = (f) => (a, b) => String(f(a) || '').localeCompare(String(f(b) || ''), 'it');
 
 /* ---------- stato ---------- */
-const COLS = ['clienti', 'commesse', 'dipendenti', 'squadre', 'assegnazioni', 'assegnazioniG', 'tipiLavoro', 'categorie', 'docAzienda', 'assicurazioni', 'mezzi', 'documenti', 'verbali', 'scadenze', 'riservato', 'accessi', 'impostazioni', 'commesseElenco', 'registri'];
+const COLS = ['clienti', 'commesse', 'dipendenti', 'squadre', 'assegnazioni', 'assegnazioniG', 'tipiLavoro', 'categorie', 'docAzienda', 'assicurazioni', 'mezzi', 'documenti', 'verbali', 'scadenze', 'riservato', 'accessi', 'impostazioni', 'commesseElenco', 'registri', 'fatture'];
 const S = { route: 'dashboard', id: null, tab: null, q: '', hq: '', fstato: '', week: null, calY: null, calM: null, ftipo: '', dcat: '', ptab: 'dipendenti', atab: 'documenti', data: {}, loaded: {}, admin: false, me: '', uid: null, late: false, offline: false, syncTrouble: false, mese: null, otab: 'riepilogo', opers: null, myOre: { mese: null, righe: [], loaded: false }, oreAll: {}, oreLoading: false, prof: {} };
 const D = (c) => Object.values(S.data[c] || {});
 const G = (c, id) => (S.data[c] || {})[id];
@@ -430,7 +430,7 @@ const ESITI = [['CONFORME', 'Conforme', 'green'], ['CONFORME_CON_RILIEVI', 'Conf
 const TIPI_VERBALE = [['RIUNIONE_PERIODICA', 'Riunione periodica'], ['SOSTENIBILITA', 'Sostenibilità'], ['RAPPORTO_DIPENDENTE', 'Rapporto con dipendente (riservato)']];
 const STATI_AZIONE = [['APERTA', 'Aperta', 'grey'], ['IN_CORSO', 'In corso', 'amber'], ['CHIUSA', 'Chiusa', 'green']];
 const ACCESSI = [['TUTTI', 'Tutti', 'grey'], ['RESPONSABILI', 'Responsabili', 'grey'], ['AMMINISTRAZIONE', 'Amministrazione', 'grey'], ['RISERVATO', 'Riservato', 'dark']];
-const TIPI_SCAD = [['APPUNTAMENTO', 'Appuntamento', 'dark'], ['FORMAZIONE', 'Formazione', 'blue'], ['PERSONALE', 'Documenti personale', 'blue'], ['AZIENDA', 'Documenti azienda', 'purple'], ['ASSICURAZIONE', 'Assicurazioni', 'teal'], ['INCASSO', 'Incassi', 'green'], ['PAGAMENTO', 'Pagamento', 'green'], ['SICUREZZA', 'Sicurezza cantiere', 'amber'], ['COMMESSA', 'Documenti commessa', 'amber'], ['DOCUMENTALE', 'Documentale', 'purple'], ['MEZZO', 'Mezzi', 'gray'], ['ALTRO', 'Altro', 'gray']];
+const TIPI_SCAD = [['APPUNTAMENTO', 'Appuntamento', 'dark'], ['FORMAZIONE', 'Formazione', 'blue'], ['PERSONALE', 'Documenti personale', 'blue'], ['AZIENDA', 'Documenti azienda', 'purple'], ['ASSICURAZIONE', 'Assicurazioni', 'teal'], ['INCASSO', 'Incassi', 'green'], ['PAGAMENTO', 'Pagamento', 'green'], ['FATTURA', 'Fatture', 'amber'], ['SICUREZZA', 'Sicurezza cantiere', 'amber'], ['COMMESSA', 'Documenti commessa', 'amber'], ['DOCUMENTALE', 'Documentale', 'purple'], ['MEZZO', 'Mezzi', 'gray'], ['ALTRO', 'Altro', 'gray']];
 
 const DEFAULT_ITER = [
   { codice: 'PREVENTIVO', nome: 'Preventivo', voci: ['Sopralluogo e rilievo', 'Computo e offerta economica', 'Invio al cliente'] },
@@ -642,7 +642,8 @@ const incassatoP = (p) => sum(p.incassi || [], (i) => i.importo);
 function statoP(p) { const inc = incassatoP(p); if (inc >= (Number(p.importo) || 0) - 0.5 && inc > 0) return 'INCASSATO'; if (inc > 0) return 'PARZIALE'; if (p.dataScadenza && p.dataScadenza < today()) return 'IN_RITARDO'; return 'PREVISTO'; }
 const incassatoC = (c) => sum(c.pagamenti || [], incassatoP);
 const previstoC = (c) => sum(c.pagamenti || [], (p) => p.importo);
-const costiC = (c) => sum(c.costi || [], (x) => x.importo);
+const fattureCom = (cid, dir) => D('fatture').filter((f) => f.commessaId === cid && f.dir === dir);
+const costiC = (c) => sum(c.costi || [], (x) => x.importo) + sum(fattureCom(c.id, 'P'), (f) => f.imponibile);
 const nomeD = (d) => (d ? (d.cognome || '') + ' ' + (d.nome || '') : '');
 const mezzoLabel = (m) => (m ? m.descrizione + (m.targa ? ' ' + m.targa : '') : '');
 const docAzOk = (tipo, at) => D('docAzienda').some((x) => x.tipo === tipo && (!x.dataScadenza || x.dataScadenza >= at));
@@ -690,8 +691,9 @@ function eventi() {
     (d.abilitazioni || []).filter((a) => !a.archiviato).forEach((a) => push(a.dataScadenza, 'FORMAZIONE', abLabel(a.tipo), nomeD(d), { r: 'dipendente', id: d.id }));
     (d.documenti || []).forEach((x) => push(x.scadenza, 'PERSONALE', x.titolo || lab(TIPI_DOC_DIP, x.tipo), nomeD(d), { r: 'dipendente', id: d.id }));
   });
-  D('docAzienda').forEach((x) => push(x.dataScadenza, 'AZIENDA', x.titolo || lab(TIPI_DOC_AZ, x.tipo), x.ente || '', { r: 'azienda', tab: 'documenti' }));
-  D('assicurazioni').forEach((x) => push(x.dataScadenza, 'ASSICURAZIONE', lab(TIPI_ASS, x.tipo), x.compagnia || '', { r: 'azienda', tab: 'assicurazioni' }));
+  D('docAzienda').filter((x) => !x.archiviato).forEach((x) => push(x.dataScadenza, 'AZIENDA', x.titolo || lab(TIPI_DOC_AZ, x.tipo), x.ente || '', { r: 'azienda', tab: 'documenti' }));
+  D('assicurazioni').filter((x) => !x.archiviato).forEach((x) => push(x.dataScadenza, 'ASSICURAZIONE', lab(TIPI_ASS, x.tipo), x.compagnia || '', { r: 'azienda', tab: 'assicurazioni' }));
+  D('fatture').filter((f) => !f.pagata && f.scadenza).forEach((f) => push(f.scadenza, 'FATTURA', (f.dir === 'P' ? 'Da pagare: ' : 'Da incassare: ') + (f.controparte || '') + ' · ' + eur2(f.tot), 'Fattura ' + (f.numero || ''), { r: 'fatture', tab: f.dir }));
   D('mezzi').filter((m) => m.attivo !== false).forEach((m) => {
     /* revisione e bollo arrivano già da qui sotto (sono due dei tipi di controllo), presi
        dall'ultimo controllo di quel tipo caricato: niente più campo scadenza separato da tenere
@@ -716,7 +718,7 @@ function eventi() {
     const sub = x.tipo === 'PAGAMENTO' ? [x.importo ? eur(x.importo) : '', x.modalita ? lab(MODALITA, x.modalita) : '', x.note || ''].filter(Boolean).join(' · ') : (x.note || '');
     push(x.data, x.tipo || 'ALTRO', (x.ora ? x.ora + ' · ' : '') + x.titolo, sub, { r: 'scadenzario', id: x.id });
   });
-  tuttiDoc().forEach((x) => push(x.scadenza, 'DOCUMENTALE', x.titolo, catPath(x.categoriaId), { r: 'documentale' }));
+  tuttiDoc().filter((x) => !x.archiviato).forEach((x) => push(x.scadenza, 'DOCUMENTALE', x.titolo, catPath(x.categoriaId), { r: 'documentale' }));
   return ev.sort((a, b) => a.data.localeCompare(b.data));
 }
 /* sezione "Documenti scaduti" riusabile dentro una pagina: stesse scadenze di eventi() (quindi
@@ -748,7 +750,7 @@ function bloccati() {
 }
 /* ---------- struttura ---------- */
 const A = {}, C = {}, I = {};
-const NAV = [['dashboard', 'Home'], ['commesse', 'Commesse'], ['iter', 'Iter commesse'], ['planning', 'Planning'], ['scadenzario', 'Calendario'], ['clienti', 'Clienti'], ['personale', 'Personale'], ['azienda', 'Azienda'], ['documentale', 'Documentale']];
+const NAV = [['dashboard', 'Home'], ['commesse', 'Commesse'], ['iter', 'Iter commesse'], ['planning', 'Planning'], ['scadenzario', 'Calendario'], ['clienti', 'Clienti'], ['personale', 'Personale'], ['azienda', 'Azienda'], ['documentale', 'Documentale'], ['fatture', 'Fatture']];
 const navItems = () => (S.admin ? NAV.concat(regs().map((r) => ['reg', r.nome, r.id]), [['ore', 'Ore del personale'], ['mieore', 'Registro ore'], ['editor', 'Impostazioni']]) : [['mieore', 'Le mie ore'], ['miidoc', 'I miei documenti'], ['planning', 'Planning']]);
 /* un'icona per voce di menu, solo per orientarsi più in fretta: le voci "reg" (i registri
    personalizzati creati da Impostazioni, il cui nome non è noto in anticipo) usano tutte
@@ -763,6 +765,7 @@ const NAV_ICONS = {
   personale: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   azienda: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   documentale: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8"/>',
+  fatture: '<path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/>',
   ore: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
   mieore: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3h6v2H9z"/><path d="M8 11h8M8 15h5"/>',
   miidoc: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
@@ -795,6 +798,7 @@ function view() {
     case 'azienda': return vAzienda();
     case 'mezzo': return vMezzo();
     case 'documentale': return vDocumentale();
+    case 'fatture': return S.admin ? vFatture() : '';
     case 'ore': return vOre();
     case 'reg': return vReg();
     case 'editor': return vEditor();
@@ -1197,6 +1201,9 @@ function tabEconomia(c) {
     { h: '', f: (p, i) => '<div class="row"><button class="btn sm" data-a="incNew" data-id="' + esc(c.id) + '" data-i="' + i + '">Incasso</button><button class="btn sm" data-a="pagEdit" data-id="' + esc(c.id) + '" data-i="' + i + '">Modifica</button></div>' }
   ], c.pagamenti || [], { empty: 'Nessuna scadenza di pagamento. Aggiungi acconto, SAL e saldo.' });
   const cst = tbl([{ h: 'Voce', f: (x) => '<b>' + esc(x.descrizione || lab(CAT_COSTO, x.categoria || 'FORNITORE')) + '</b><div class="small muted">' + esc([x.fornitore, x.numeroFattura ? 'fatt. ' + x.numeroFattura : ''].filter(Boolean).join(' · ')) + '</div>' }, { h: 'Tipo', f: (x) => stBadge(CAT_COSTO, x.categoria || 'FORNITORE') }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Importo', r: true, f: (x) => eur(x.importo) }, { h: 'File', f: (x) => fileLink(x.file) }], c.costi || [], { empty: 'Nessun costo registrato. Aggiungi fatture, pedaggi, carburante, energia o manodopera.', row: (x, i) => 'data-a="costEdit" data-id="' + esc(c.id) + '" data-i="' + i + '"' });
+  const fP = fattureCom(c.id, 'P'), fA = fattureCom(c.id, 'A');
+  const fRows = (arr) => arr.length ? '<div class="small muted" style="margin:8px 0 4px">' + (arr === fP ? 'Fatture dei fornitori (da Fatture)' : 'Fatture emesse al cliente (da Fatture)') + '</div>' + tbl([{ h: 'Fattura', f: (f) => '<b>' + esc(f.controparte || '') + '</b><div class="small muted">fatt. ' + esc(f.numero || '') + ' · ' + esc(fmtD(f.data)) + '</div>' }, { h: 'Imponibile', r: true, f: (f) => eur2(f.imponibile) }, { h: 'Stato', f: (f) => fatStato(f) }], arr, { row: (f) => 'data-a="fatEdit" data-id="' + esc(f.id) + '"' }) : '';
+  const chipF = fP.length ? '<div class="row" style="margin:0 0 10px"><span class="badge amber">Fatture fornitori: ' + eur2(sum(fP, (f) => f.imponibile)) + '</span></div>' : '';
   const perCat = CAT_COSTO.map((k) => [k, sum((c.costi || []).filter((x) => (x.categoria || 'FORNITORE') === k[0]), (x) => x.importo)]).filter((r) => r[1] > 0);
   const chips = perCat.length ? '<div class="row" style="flex-wrap:wrap;gap:8px;margin:0 0 10px">' + perCat.map((r) => '<span class="badge ' + r[0][2] + '">' + esc(r[0][1]) + ': ' + eur(r[1]) + '</span>').join('') + '</div>' : '';
   const docsAmm = (c.documentiAmm || []).filter((x) => !TIPI_DOC_TEC.includes(x.tipo)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
@@ -1206,7 +1213,7 @@ function tabEconomia(c) {
   const docC = tbl(colDocComm, docsAmm.filter((x) => !OFF_T.includes(x.tipo)), { empty: 'Nessun documento caricato: contratto, conferma d’ordine, DICO…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
   const docT_unused = tbl(colDocComm, docsTec, { empty: 'Nessun documento caricato: progetti, valutazioni energetiche, bollette del cliente, schede tecniche dei materiali…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
   return '<div class="grid g4" style="margin-bottom:16px">' + kpi('Importo contratto', eur(c.importo), '+ IVA ' + (c.aliquotaIva || 0) + '%') + kpi('Incassato', eur(inc), (Number(c.importo) ? Math.round(100 * inc / Number(c.importo)) : 0) + '% del contratto') + kpi('Ancora da incassare', eur(Math.max(0, prev - inc)), 'Su scadenze registrate: ' + eur(prev)) + kpi('Margine attuale', eur(Number(c.importo) - costi), 'Costi registrati: ' + eur(costi)) + '</div><div class="stack">' +
-    card('Offerte e preventivi', docOff, '<button class="btn p sm" data-a="docOffNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Contratto e ordini', docC, '<button class="btn p sm" data-a="docCommNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Pagamenti e incassi', pag, '<button class="btn p sm" data-a="pagNew" data-id="' + esc(c.id) + '">+ Pagamento</button>') + card('Costi e fornitori', chips + cst, CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="costNewCat" data-id="' + esc(c.id) + '" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '')) + '</div>';
+    card('Offerte e preventivi', docOff, '<button class="btn p sm" data-a="docOffNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Contratto e ordini', docC, '<button class="btn p sm" data-a="docCommNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Pagamenti e incassi', pag + fRows(fA), '<button class="btn p sm" data-a="pagNew" data-id="' + esc(c.id) + '">+ Pagamento</button>') + card('Costi e fornitori', chips + chipF + cst + fRows(fP), CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="costNewCat" data-id="' + esc(c.id) + '" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '')) + '</div>';
 }
 A.pagNew = (d) => editSub({ col: 'commesse', id: d.id, key: 'pagamenti', title: 'Scadenza di pagamento', fields: pagFields(), defaults: { incassi: [] } });
 A.pagEdit = (d) => editSub({ col: 'commesse', id: d.id, key: 'pagamenti', i: d.i, title: 'Scadenza di pagamento', fields: pagFields() });
@@ -1559,14 +1566,17 @@ A.atab = (d) => { S.atab = d.t; queueRender(); };
 
 const docAzFields = () => [{ k: 'tipo', l: 'Tipo di documento', t: 'select', req: true, opts: TIPI_DOC_AZ.map((x) => [x[0], x[1]]) }, { k: 'titolo', l: 'Titolo (facoltativo)' }, { k: 'ente', l: 'Ente emittente', half: true }, { k: 'numero', l: 'Numero', half: true }, { k: 'dataEmissione', l: 'Emissione', t: 'date', half: true }, { k: 'dataScadenza', l: 'Scadenza', t: 'date', half: true, hint: 'Se la lasci vuota e il tipo di documento ha una validità indicativa impostata (Impostazioni → Elenchi), viene proposta da sola.' }, { k: 'file', l: 'File', t: 'file' }, { k: 'note', l: 'Note', t: 'textarea' }];
 const docAzMap = (it) => { if (!it.dataScadenza && it.dataEmissione) { const m = (TIPI_DOC_AZ.find((x) => x[0] === it.tipo) || [])[2]; if (m) it.dataScadenza = addMonths(it.dataEmissione, m); } return it; };
+const FOLD_DOCIMP = '01 Documenti impresa', FOLD_ASSIMP = '05 Assicurazioni impresa', FOLD_AMM = '02 Amministrazione e contabilità', FOLD_CONTR = '03 Contratti', FOLD_QUAL = '04 Sistema qualità e sicurezza';
 function aDocumenti() {
   const durc = docAzOk('DURC', today());
   const alert = durc ? '' : '<div class="alert red" style="margin-bottom:12px"><b>DURC mancante o scaduto.</b> Le nuove assegnazioni nel planning sono bloccate finché non viene inserito un DURC valido.</div>';
-  const t = tbl([{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo || lab(TIPI_DOC_AZ, x.tipo)) + '</b><div class="small muted">' + esc(lab(TIPI_DOC_AZ, x.tipo)) + '</div>' }, { h: 'Ente', f: (x) => esc(x.ente) }, { h: 'Numero', f: (x) => esc(x.numero) }, { h: 'Emissione', f: (x) => esc(fmtD(x.dataEmissione)) }, { h: 'Scadenza', f: (x) => x.dataScadenza ? scadBadge(x.dataScadenza) : '<span class="muted">Non scade</span>' }, { h: 'File', f: (x) => fileLink(x.file) }], D('docAzienda').sort((a, b) => String(a.dataScadenza || '9999').localeCompare(String(b.dataScadenza || '9999'))), { empty: 'Nessun documento. Inserisci DURC, visura camerale, abilitazioni e certificazioni.', row: (x) => 'data-a="daEdit" data-id="' + esc(x.id) + '"' });
-  return alert + cardScaduti((e) => e.tipo === 'AZIENDA') + cardPagamentiScaduti() + card('Documenti e abilitazioni dell\u2019impresa', t, '<button class="btn p sm" data-a="daNew">+ Documento</button>');
+  const t = tbl([{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo || lab(TIPI_DOC_AZ, x.tipo)) + '</b><div class="small muted">' + esc(lab(TIPI_DOC_AZ, x.tipo)) + '</div>' }, { h: 'Ente', f: (x) => esc(x.ente) }, { h: 'Numero', f: (x) => esc(x.numero) }, { h: 'Emissione', f: (x) => esc(fmtD(x.dataEmissione)) }, { h: 'Scadenza', f: (x) => x.dataScadenza ? scadBadge(x.dataScadenza) : '<span class="muted">Non scade</span>' }, { h: 'File', f: (x) => fileLink(x.file) }], D('docAzienda').filter((x) => !x.archiviato).sort((a, b) => String(a.dataScadenza || '9999').localeCompare(String(b.dataScadenza || '9999'))), { empty: 'Nessun documento. Inserisci DURC, visura camerale, abilitazioni e certificazioni.', row: (x) => 'data-a="daEdit" data-id="' + esc(x.id) + '"' });
+  const arch = D('docAzienda').filter((x) => x.archiviato).sort((a, b) => String(b.dataScadenza || b.dataEmissione || '').localeCompare(String(a.dataScadenza || a.dataEmissione || '')));
+  const ta = tbl([{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo || lab(TIPI_DOC_AZ, x.tipo)) + '</b><div class="small muted">' + esc(lab(TIPI_DOC_AZ, x.tipo)) + '</div>' }, { h: 'Emissione', f: (x) => esc(fmtD(x.dataEmissione)) }, { h: 'Scadenza', f: (x) => x.dataScadenza ? esc(fmtD(x.dataScadenza)) : '<span class="muted">—</span>' }, { h: 'File', f: (x) => fileLink(x.file) }], arch, { empty: 'Nessun documento scaduto o sostituito. Quando carichi un documento dello stesso tipo, quello vecchio passa qui e nella cartella Scaduti su Drive.', row: (x) => 'data-a="daEdit" data-id="' + esc(x.id) + '"' });
+  return alert + cardScaduti((e) => e.tipo === 'AZIENDA') + cardPagamentiScaduti() + card('Documenti e abilitazioni dell\u2019impresa', t, '<button class="btn p sm" data-a="daNew">+ Documento</button>') + card('Scaduti e sostituiti' + (arch.length ? ' (' + arch.length + ')' : ''), ta);
 }
-A.daNew = () => openForm({ title: 'Documento aziendale', fields: docAzFields(), values: {}, folder: ['Azienda', 'Documenti impresa'], onSave: (v) => put('docAzienda', newId('docAzienda'), docAzMap(v)) });
-A.daEdit = (d) => { const x = G('docAzienda', d.id); openForm({ title: 'Documento aziendale', fields: docAzFields(), values: x, folder: ['Azienda', 'Documenti impresa'], onSave: (v) => patch('docAzienda', x.id, docAzMap(v)), onDelete: () => remove('docAzienda', x.id) }); };
+A.daNew = () => openForm({ title: 'Documento aziendale', fields: docAzFields(), values: {}, folder: ['Azienda', FOLD_DOCIMP], onSave: (v) => put('docAzienda', newId('docAzienda'), docAzMap(v)) });
+A.daEdit = (d) => { const x = G('docAzienda', d.id); openForm({ title: 'Documento aziendale', fields: docAzFields(), values: x, folder: ['Azienda', FOLD_DOCIMP], onSave: (v) => patch('docAzienda', x.id, docAzMap(v)), onDelete: () => remove('docAzienda', x.id) }); };
 
 const assFields = () => [{ k: 'tipo', l: 'Tipo di polizza', t: 'select', req: true, opts: TIPI_ASS }, { k: 'compagnia', l: 'Compagnia', req: true, half: true }, { k: 'numeroPolizza', l: 'N. polizza', half: true }, { k: 'massimale', l: 'Massimale (€)', t: 'number', half: true }, { k: 'premio', l: 'Premio annuo (€)', t: 'number', half: true }, { k: 'dataInizio', l: 'Decorrenza', t: 'date', half: true }, { k: 'dataScadenza', l: 'Scadenza', t: 'date', req: true, half: true }, { k: 'mezzoId', l: 'Mezzo (se polizza di un mezzo)', t: 'select', half: true, opts: D('mezzi').map((m) => [m.id, m.descrizione + (m.targa ? ' ' + m.targa : '')]) }, { k: 'commessaId', l: 'Commessa (se polizza CAR)', t: 'select', half: true, opts: D('commesse').map((c) => [c.id, commessaLabel(c)]) }, { k: 'file', l: 'Polizza (file)', t: 'file', half: true }, { k: 'quietanza', l: 'Quietanza di pagamento', t: 'file', half: true }, { k: 'note', l: 'Note', t: 'textarea' }];
 function aAssicurazioni() {
@@ -1574,7 +1584,7 @@ function aAssicurazioni() {
   /* le polizze dei mezzi stanno nella scheda di ciascun mezzo (Azienda › Mezzi): qui restano
      solo quelle aziendali; una polizza "Mezzi aziendali" non ancora collegata a un mezzo
      resta visibile con l'avviso, così non si perde. */
-  const tutte = D('assicurazioni'), dei = tutte.filter((x) => x.mezzoId), azi = tutte.filter((x) => !x.mezzoId);
+  const tutte = D('assicurazioni'), dei = tutte.filter((x) => x.mezzoId), azi = tutte.filter((x) => !x.mezzoId && !x.archiviato), aziArch = tutte.filter((x) => !x.mezzoId && x.archiviato);
   const t = tbl([{ h: 'Polizza', f: (x) => '<b>' + esc(lab(TIPI_ASS, x.tipo)) + '</b><div class="small muted">' + esc(x.compagnia) + (x.numeroPolizza ? ' · ' + esc(x.numeroPolizza) : '') + '</div>' + (x.tipo === 'MEZZI_AZIENDALI' ? '<div class="small" style="color:#b45309">Da collegare a un mezzo</div>' : '') }, { h: 'Riferimento', f: rif }, { h: 'Massimale', r: true, f: (x) => x.massimale ? eur(x.massimale) : '' }, { h: 'Premio', r: true, f: (x) => x.premio ? eur(x.premio) : '' }, { h: 'Scadenza', f: (x) => scadBadge(x.dataScadenza) }, { h: 'File', f: (x) => fileLink(x.file) }, { h: 'Quietanza', f: (x) => fileLink(x.quietanza) }], azi.sort((a, b) => String(a.dataScadenza).localeCompare(String(b.dataScadenza))), { empty: 'Nessuna polizza registrata.', row: (x) => 'data-a="assEdit" data-id="' + esc(x.id) + '"' });
   const nota = dei.length ? '<div class="hint">' + (dei.length === 1 ? 'Una polizza di un mezzo è' : dei.length + ' polizze dei mezzi sono') + ' nella scheda di ciascun mezzo (Azienda › Mezzi e attrezzature › apri il mezzo › Assicurazioni).</div>' : '';
   const sinBlocchi = azi.map((x) => {
@@ -1582,10 +1592,10 @@ function aAssicurazioni() {
     const tb = tbl([{ h: 'Sinistro', f: (s) => '<b>' + esc(fmtD(s.data)) + '</b><div class="small muted">' + esc(s.luogo || '') + (s.numeroSinistro ? ' · pratica ' + esc(s.numeroSinistro) : '') + '</div>' }, { h: 'Stato', f: (s) => stBadge(STATI_SIN, s.stato || 'APERTO') }, { h: 'Controparte', f: (s) => esc(s.controparte) }, { h: 'Importo', r: true, f: (s) => s.importo ? eur(s.importo) : '' }, { h: 'Documenti', f: (s) => fileLink(s.file) }], sl, { empty: 'Nessun sinistro su questa polizza.', row: (s) => 'data-a="sinAssEdit" data-id="' + esc(x.id) + '" data-x="' + esc(s.id) + '"' });
     return '<div style="margin-bottom:14px"><div class="row" style="justify-content:space-between;align-items:center"><b>' + esc(lab(TIPI_ASS, x.tipo)) + ' · ' + esc(x.compagnia || '') + '</b><button class="btn sm" data-a="sinAssNew" data-id="' + esc(x.id) + '">+ Sinistro</button></div>' + tb + '</div>';
   }).join('');
-  return cardScaduti((e) => e.tipo === 'ASSICURAZIONE') + card('Assicurazioni impresa', t + nota, '<button class="btn p sm" data-a="assNew">+ Polizza</button>') + card('Sinistri (polizze RCT e aziendali)', sinBlocchi || '<div class="empty">Nessuna polizza.</div>');
+  return cardScaduti((e) => e.tipo === 'ASSICURAZIONE') + card('Assicurazioni impresa', t + nota, '<button class="btn p sm" data-a="assNew">+ Polizza</button>') + card('Sinistri (polizze RCT e aziendali)', sinBlocchi || '<div class="empty">Nessuna polizza.</div>') + card('Scaduti e sostituiti' + (aziArch.length ? ' (' + aziArch.length + ')' : ''), tbl([{ h: 'Polizza', f: (x) => '<b>' + esc(lab(TIPI_ASS, x.tipo)) + '</b><div class="small muted">' + esc(x.compagnia) + (x.numeroPolizza ? ' · ' + esc(x.numeroPolizza) : '') + '</div>' }, { h: 'Scadenza', f: (x) => esc(fmtD(x.dataScadenza)) }, { h: 'File', f: (x) => fileLink(x.file) }, { h: 'Quietanza', f: (x) => fileLink(x.quietanza) }], aziArch, { empty: 'Nessuna polizza scaduta o sostituita.', row: (x) => 'data-a="assEdit" data-id="' + esc(x.id) + '"' }));
 }
-A.assNew = () => openForm({ title: 'Polizza', wide: true, fields: assFields(), values: {}, folder: ['Azienda', 'Assicurazioni'], onSave: (v) => put('assicurazioni', newId('assicurazioni'), v) });
-A.assEdit = (d) => { const x = G('assicurazioni', d.id); openForm({ title: 'Polizza', wide: true, fields: assFields(), values: x, folder: ['Azienda', 'Assicurazioni'], onSave: (v) => patch('assicurazioni', x.id, v), onDelete: () => remove('assicurazioni', x.id) }); };
+A.assNew = () => openForm({ title: 'Polizza', wide: true, fields: assFields(), values: {}, folder: ['Azienda', FOLD_ASSIMP], onSave: (v) => put('assicurazioni', newId('assicurazioni'), v) });
+A.assEdit = (d) => { const x = G('assicurazioni', d.id); openForm({ title: 'Polizza', wide: true, fields: assFields(), values: x, folder: ['Azienda', FOLD_ASSIMP], onSave: (v) => patch('assicurazioni', x.id, v), onDelete: () => remove('assicurazioni', x.id) }); };
 
 let mezzoFields = () => [{ k: 'tipo', l: 'Tipo', t: 'select', req: true, half: true, opts: TIPI_MEZZO }, { k: 'descrizione', l: 'Descrizione', req: true, half: true, ph: 'Es. Furgone Iveco Daily' }, { k: 'targa', l: 'Targa / matricola', half: true }, { k: 'assegnatoId', l: 'Assegnato a', t: 'select', half: true, opts: D('dipendenti').sort(byStr((x) => x.cognome)).map((d) => [d.id, nomeD(d)]) }, { k: 'alimentazione', l: 'Alimentazione', t: 'select', half: true, opts: [['DIESEL', 'Diesel'], ['BENZINA', 'Benzina'], ['ELETTRICO', 'Elettrico']] }, { k: 'consumo', l: 'Consumo (l/100 km o kWh/100 km)', t: 'number', half: true, hint: 'Serve al calcolo automatico del costo carburante.' }, { k: 'libretto', l: 'Libretto di circolazione (file)', t: 'file' }, { k: 'attivo', l: 'In servizio', t: 'checkbox' }];
 /* scadenza di revisione/bollo presa dall'ultimo controllo di quel tipo caricato in "Controlli,
@@ -1702,14 +1712,14 @@ function catOpts() { return D('categorie').filter((c) => c.parentId).filter((c) 
 function vDocumentale() {
   const roots = D('categorie').filter((c) => !c.parentId).sort(byStr((c) => c.nome));
   const figli = (id) => D('categorie').filter((c) => c.parentId === id).sort(byStr((c) => c.nome));
-  const docs = tuttiDoc();
+  const tutti = tuttiDoc(), docs = tutti.filter((x) => !x.archiviato), arch = tutti.filter((x) => x.archiviato);
   const setSel = (id) => { const s = new Set([id]); figli(id).forEach((c) => s.add(c.id)); return s; };
   const cnt = (id) => { const s = setSel(id); return docs.filter((x) => s.has(x.categoriaId)).length; };
   const visRoots = roots.filter((r) => S.admin || !r.riservato);
-  const tree = '<div class="tree"><button class="p' + (!S.dcat ? ' on' : '') + '" data-a="dcat" data-c=""><span>Tutti i documenti</span><span class="muted small">' + docs.length + '</span></button>' + visRoots.map((r) => '<button class="p' + (S.dcat === r.id ? ' on' : '') + '" data-a="dcat" data-c="' + esc(r.id) + '"><span>' + esc(r.nome) + '</span><span class="muted small">' + cnt(r.id) + '</span></button>' + figli(r.id).map((c) => '<button class="c' + (S.dcat === c.id ? ' on' : '') + '" data-a="dcat" data-c="' + esc(c.id) + '"><span>' + esc(c.nome) + '</span><span class="muted small">' + cnt(c.id) + '</span></button>').join('')).join('') + '</div>';
-  const q = S.q.toLowerCase(), sel = S.dcat ? setSel(S.dcat) : null;
-  const rows = docs.filter((x) => (!sel || sel.has(x.categoriaId)) && (!q || ((x.titolo || '') + ' ' + catPath(x.categoriaId)).toLowerCase().includes(q))).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
-  const t = tbl([{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo) + '</b>' + (x.commessaId && G('commesse', x.commessaId) ? '<div class="small muted">Commessa ' + esc(G('commesse', x.commessaId).codice) + '</div>' : '') }, { h: 'Categoria', f: (x) => esc(catPath(x.categoriaId)) }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Scadenza', f: (x) => x.scadenza ? scadBadge(x.scadenza) : '<span class="muted">—</span>' }, { h: 'Accesso', f: (x) => stBadge(ACCESSI, x.accesso || 'RESPONSABILI') }, { h: 'File', f: (x) => fileLink(x.file) }], rows, { empty: 'Nessun documento in questa categoria.', row: (x) => 'data-a="docEdit" data-id="' + esc(x.id) + '" data-col="' + colDoc(x) + '"' });
+  const tree = '<div class="tree"><button class="p' + (!S.dcat ? ' on' : '') + '" data-a="dcat" data-c=""><span>Tutti i documenti</span><span class="muted small">' + docs.length + '</span></button>' + visRoots.map((r) => '<button class="p' + (S.dcat === r.id ? ' on' : '') + '" data-a="dcat" data-c="' + esc(r.id) + '"><span>' + esc(r.nome) + '</span><span class="muted small">' + cnt(r.id) + '</span></button>' + figli(r.id).map((c) => '<button class="c' + (S.dcat === c.id ? ' on' : '') + '" data-a="dcat" data-c="' + esc(c.id) + '"><span>' + esc(c.nome) + '</span><span class="muted small">' + cnt(c.id) + '</span></button>').join('')).join('') + '<button class="p' + (S.dcat === '__scaduti' ? ' on' : '') + '" data-a="dcat" data-c="__scaduti"><span>Scaduti</span><span class="muted small">' + arch.length + '</span></button></div>';
+  const q = S.q.toLowerCase(), sel = S.dcat && S.dcat !== '__scaduti' ? setSel(S.dcat) : null;
+  const rows = (S.dcat === '__scaduti' ? arch : docs).filter((x) => (!sel || sel.has(x.categoriaId)) && (!q || ((x.titolo || '') + ' ' + catPath(x.categoriaId)).toLowerCase().includes(q))).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+  const t = tbl([{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo) + '</b>' + (x.commessaId && G('commesse', x.commessaId) ? '<div class="small muted">Commessa ' + esc(G('commesse', x.commessaId).codice) + '</div>' : '') }, { h: 'Categoria', f: (x) => esc(catPath(x.categoriaId)) }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Scadenza', f: (x) => x.scadenza ? (x.archiviato ? bd(fmtD(x.scadenza), 'red') : scadBadge(x.scadenza)) : '<span class="muted">—</span>' }, { h: 'Accesso', f: (x) => stBadge(ACCESSI, x.accesso || 'RESPONSABILI') }, { h: 'File', f: (x) => fileLink(x.file) }], rows, { empty: S.dcat === '__scaduti' ? 'Nessun documento scaduto: quelli con scadenza passata finiscono qui e nella cartella Scaduti su Drive.' : 'Nessun documento in questa categoria.', row: (x) => 'data-a="docEdit" data-id="' + esc(x.id) + '" data-col="' + colDoc(x) + '"' });
   const verb = D('verbali').concat(S.admin ? D('riservato').filter((x) => x.kind === 'verbale') : []).sort((a, b) => String(b.data).localeCompare(String(a.data)));
   const vt = tbl([{ h: 'Data', f: (v) => esc(fmtD(v.data)) }, { h: 'Verbale', f: (v) => '<b>' + esc(v.oggetto) + '</b><div class="small muted">' + esc(lab(TIPI_VERBALE, v.tipo)) + '</div>' }, { h: 'Azioni', f: (v) => { const ap = (v.azioni || []).filter((a) => a.stato !== 'CHIUSA').length; return (v.azioni || []).length ? bd(ap + ' aperte / ' + v.azioni.length, ap ? 'amber' : 'green') : '<span class="muted">—</span>'; } }, { h: 'Riservato', f: (v) => (G('riservato', v.id) ? bd('Riservato', 'dark') : '') }, { h: 'File', f: (v) => fileLink(v.file) }], verb, { empty: 'Nessun verbale. Registra riunioni periodiche, verbali di sostenibilità e di rapporto con i dipendenti.', row: (v) => 'data-a="verbOpen" data-id="' + esc(v.id) + '" data-col="' + (G('riservato', v.id) ? 'riservato' : 'verbali') + '"' });
   return pageHead('Documentale', 'Sicurezza, mezzi, certificazioni, sostenibilità e verbali, divisi per categoria.', '<button class="btn" data-a="verbNew">Nuovo verbale</button><button class="btn p" data-a="docNew">Carica documento</button>') +
@@ -1729,7 +1739,13 @@ function saveDoc(oldCol, oldId, v, base) {
 }
 /* cartella Drive del documento: se caricato dalla scheda di una commessa, va dentro quella
    commessa; altrimenti (dal Documentale generale) dentro la categoria scelta nel modulo */
-const docFolderPath = (commessaId) => (out) => commessaId ? ['Commesse', commessaLabel(G('commesse', commessaId)), 'Documenti'] : ['Documentale', catPath(out.categoriaId) || 'Senza categoria'];
+const docFolderPath = (commessaId) => (out) => {
+  if (commessaId) return ['Commesse', commessaLabel(G('commesse', commessaId)), 'Documenti'];
+  const c = G('categorie', out.categoriaId), r = c && c.parentId ? G('categorie', c.parentId) : null;
+  if (!c) return ['Azienda', 'Senza categoria'];
+  const root = r ? r.nome : c.nome, yr = String(out.data || today()).slice(0, 4);
+  return ['Azienda', root].concat(r && root === FOLD_AMM ? [yr] : [], r ? [c.nome] : []);
+};
 function docNewForm(commessaId) {
   if (!catOpts().length) { toast('Le categorie documentali non sono ancora configurate.', 'err'); return; }
   openForm({ title: 'Carica documento', wide: true, fields: docFields(), values: { data: today(), accesso: 'RESPONSABILI' }, folder: docFolderPath(commessaId), onSave: (v) => saveDoc(null, null, v, commessaId ? { commessaId } : {}) });
@@ -1754,8 +1770,8 @@ function saveVerbale(oldCol, old, v) {
   if (old && oldCol === col) return patch(col, old.id, obj);
   return put(col, newId(col), obj).then(() => (old ? remove(oldCol, old.id) : null));
 }
-A.verbNew = () => openForm({ title: 'Nuovo verbale', wide: true, fields: verbFields(), values: { data: today(), tipo: 'RIUNIONE_PERIODICA' }, folder: ['Documentale', 'Verbali'], onSave: (v) => saveVerbale(null, null, v) });
-A.verbEditF = (d) => { const col = d.col, x = G(col, d.id); openForm({ title: 'Verbale', wide: true, fields: verbFields(), values: Object.assign({}, x, { partecipantiTxt: (x.partecipanti || []).join('\n'), azioniTxt: azioniToText(x.azioni) }), folder: ['Documentale', 'Verbali'], onSave: (v) => saveVerbale(col, x, v), onDelete: () => remove(col, x.id) }); };
+A.verbNew = () => openForm({ title: 'Nuovo verbale', wide: true, fields: verbFields(), values: { data: today(), tipo: 'RIUNIONE_PERIODICA' }, folder: ['Azienda', FOLD_QUAL, 'Riunioni periodiche e verbali'], onSave: (v) => saveVerbale(null, null, v) });
+A.verbEditF = (d) => { const col = d.col, x = G(col, d.id); openForm({ title: 'Verbale', wide: true, fields: verbFields(), values: Object.assign({}, x, { partecipantiTxt: (x.partecipanti || []).join('\n'), azioniTxt: azioniToText(x.azioni) }), folder: ['Azienda', FOLD_QUAL, 'Riunioni periodiche e verbali'], onSave: (v) => saveVerbale(col, x, v), onDelete: () => remove(col, x.id) }); };
 A.verbOpen = (d) => {
   const col = d.col, x = G(col, d.id); if (!x) return;
   const az = (x.azioni || []).length ? (x.azioni || []).map((a, i) => '<div class="blk"><div style="flex:1"><b>' + esc(a.descrizione) + '</b><div class="small muted">' + esc(a.responsabile || 'Nessun responsabile') + (a.scadenza ? ' · entro ' + esc(fmtD(a.scadenza)) : '') + '</div></div><select data-c="azStato" data-id="' + esc(x.id) + '" data-col="' + col + '" data-i="' + i + '" aria-label="Stato dell\u2019azione" style="width:auto">' + STATI_AZIONE.map((s) => '<option value="' + s[0] + '"' + (a.stato === s[0] ? ' selected' : '') + '>' + esc(s[1]) + '</option>').join('') + '</select></div>').join('') : '<div class="muted">Nessuna azione.</div>';
@@ -2521,8 +2537,54 @@ function edCategorie() {
   const btn = (a, id, t) => '<button class="btn sm" data-a="' + a + '" data-id="' + esc(id) + '">' + t + '</button>';
   const row = (c, lv) => '<div class="blk" style="padding-left:' + (lv ? 28 : 0) + 'px"><div style="flex:1">' + (lv ? '' : '<b>') + esc(c.nome) + (lv ? '' : '</b>') + (c.riservato ? ' ' + bd('Riservata', 'dark') : '') + '</div><span class="row">' + btn('catEdit', c.id, 'Modifica') + (lv ? '' : '<button class="btn sm" data-a="catNew" data-p="' + esc(c.id) + '">+ Sottocategoria</button>') + '</span></div>';
   const rows = roots.map((r) => { const f = D('categorie').filter((c) => c.parentId === r.id).sort(byStr((c) => c.nome)); return row(r, 0) + f.map((c) => row(c, 1)).join('') + (f.length ? '' : '<div class="small muted" style="padding:0 0 8px 28px">Nessuna sottocategoria: i documenti si archiviano nelle sottocategorie.</div>'); }).join('');
-  return card('Categorie dei documenti', '<p class="muted small" style="margin:0 0 6px">Due livelli: categoria e sottocategorie, ordinate alfabeticamente. I documenti si salvano nelle sottocategorie. Una categoria «riservata» rende riservate anche le sue sottocategorie.</p>' + (rows || '<div class="empty">Nessuna categoria.</div>'), '<button class="btn p sm" data-a="catNew" data-p="">+ Categoria</button>');
+  return card('Categorie dei documenti', '<p class="muted small" style="margin:0 0 6px">Due livelli: categoria e sottocategorie, ordinate alfabeticamente. I documenti si salvano nelle sottocategorie. Una categoria «riservata» rende riservate anche le sue sottocategorie.</p>' + (rows || '<div class="empty">Nessuna categoria.</div>'), '<button class="btn sm" data-a="catMigra">Riordina nella nuova struttura</button><button class="btn p sm" data-a="catNew" data-p="">+ Categoria</button>');
 }
+/* riordino delle categorie esistenti secondo la nuova struttura (02 Amministrazione, 03 Contratti, 04 Qualità e sicurezza):
+   sposta i documenti nelle nuove sottocategorie e toglie quelle vecchie rimaste vuote. Chiede conferma mostrando cosa cambia. */
+const MIGRA_CAT = [
+  ['Sicurezza', '*', '04 Sistema qualità e sicurezza', 'DVR, procedure e nomine sicurezza'],
+  ['Certificazioni', '*', '04 Sistema qualità e sicurezza', 'Certificazioni ISO e audit'],
+  ['Sostenibilita', '*', '04 Sistema qualità e sicurezza', 'Sostenibilità e rifiuti'],
+  ['Amministrazione e contabilita', 'Contratti e corrispondenza', '03 Contratti', 'Altri contratti'],
+  ['Amministrazione e contabilita', 'Fatture e documenti contabili', '02 Amministrazione e contabilità', 'Fatture generali'],
+  ['Amministrazione e contabilita', 'Adempimenti fiscali e tributari', '02 Amministrazione e contabilità', 'Bilanci e dichiarazioni'],
+  ['Amministrazione e contabilita', 'Prima nota', '02 Amministrazione e contabilità', 'Prima nota e contabilità'],
+  ['Bilancio', '*', '02 Amministrazione e contabilità', 'Bilanci e dichiarazioni'],
+  ['Rapporti Banche', '*', '02 Amministrazione e contabilità', 'Banche e finanziamenti']
+];
+const nrm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+function catPiano() {
+  const out = [];
+  D('categorie').filter((c) => c.parentId).forEach((c) => {
+    const r = G('categorie', c.parentId); if (!r) return;
+    const m = MIGRA_CAT.find((x) => nrm(x[0]) === nrm(r.nome) && (x[1] === '*' || nrm(x[1]) === nrm(c.nome)));
+    if (m && !(nrm(m[2]) === nrm(r.nome) && nrm(m[3]) === nrm(c.nome))) out.push({ c: c, r: r, to: [m[2], m[3]], n: tuttiDoc().filter((x) => x.categoriaId === c.id).length });
+  });
+  return out;
+}
+async function catEnsure(rootName, subName) {
+  let r = D('categorie').find((c) => !c.parentId && nrm(c.nome) === nrm(rootName));
+  if (!r) { const id = 'cat-' + slug(rootName); await db.doc('categorie/' + id).set({ nome: rootName, parentId: null, ordine: D('categorie').filter((x) => !x.parentId).length + 1 }); r = { id: id, nome: rootName }; }
+  let c = D('categorie').find((x) => x.parentId === r.id && nrm(x.nome) === nrm(subName));
+  if (!c) { const id = 'cat-' + slug(rootName).slice(0, 8) + '-' + slug(subName); await db.doc('categorie/' + id).set({ nome: subName, parentId: r.id, ordine: 99 }); c = { id: id }; }
+  return c.id;
+}
+A.catMigra = async () => {
+  const pi = catPiano();
+  if (!pi.length) { toast('Le categorie sono già nella nuova struttura: niente da riordinare.'); return; }
+  const righe = pi.map((x) => x.r.nome + ' / ' + x.c.nome + ' → ' + x.to[0] + ' / ' + x.to[1] + ' (' + x.n + ' doc.)').join(' · ');
+  if (!(await confirmBox('Riordino le categorie secondo la nuova struttura. Cambia così: ' + righe + '. I documenti vengono spostati nella nuova categoria; le vecchie categorie rimaste vuote vengono tolte. I file su Drive restano dove sono.', 'Riordina'))) return;
+  let nd = 0;
+  try {
+    for (const x of pi) {
+      const nid = await catEnsure(x.to[0], x.to[1]);
+      for (const d of tuttiDoc().filter((y) => y.categoriaId === x.c.id)) { await patch(colDoc(d), d.id, { categoriaId: nid }); nd++; }
+      await db.doc('categorie/' + x.c.id).delete();
+    }
+    for (const r of D('categorie').filter((c) => !c.parentId)) { const resta = D('categorie').some((c) => c.parentId === r.id && !pi.some((x) => x.c.id === c.id)); if (!resta && pi.some((x) => x.r.id === r.id)) await db.doc('categorie/' + r.id).delete(); }
+    toast('Categorie riordinate: ' + nd + (nd === 1 ? ' documento spostato.' : ' documenti spostati.'));
+  } catch (e) { toast('Riordino non completato: riprova.', 'err'); }
+};
 A.catNew = (d) => {
   const p = d.p || '';
   openForm({ title: p ? 'Nuova sottocategoria di ' + G('categorie', p).nome : 'Nuova categoria', fields: [{ k: 'nome', l: 'Nome', req: true }, { k: 'riservato', l: 'Riservata (visibile solo agli amministratori)', t: 'checkbox' }], values: {}, onSave: async (v) => { await put('categorie', 'cat-' + uniq(slug(v.nome), D('categorie').map((c) => c.id.replace(/^cat-/, ''))), { nome: v.nome, parentId: p || null, riservato: !!v.riservato }); } });
@@ -3433,6 +3495,110 @@ async function tryResume() {
   }
 }
 
+/* ---------- fatture elettroniche (passive e attive) ---------- */
+/* Le fatture si importano dai file XML della fatturazione elettronica (anche firmati .p7m o in uno ZIP).
+   L'XML originale va su Drive (Azienda › 02 Amministrazione e contabilità › anno › Fatture › Passive/Attive);
+   dall'XML si leggono numero, data, controparte, imponibile, IVA, totale e scadenza. Una fattura già
+   importata (stessa controparte, numero e data) non si duplica. importaFatture() è lo stesso punto
+   di ingresso che userà l'importazione automatica. */
+const eur2 = (n) => '€\u00a0' + (Number(n) || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fatStato = (f) => (f.pagata ? bd(f.dir === 'P' ? 'Pagata' : 'Incassata', 'green') : f.scadenza && f.scadenza < today() ? bd('Scaduta', 'red') : bd(f.dir === 'P' ? 'Da pagare' : 'Da incassare', 'amber'));
+const fattPath = (dir, data) => ['Azienda', FOLD_AMM, String(data || today()).slice(0, 4), 'Fatture', dir === 'P' ? 'Passive' : 'Attive'];
+const fattId = (r) => { const k = [r.dir, r.piva, r.numero, r.data].join('|'); return 'f' + hashC(k) + hashC(k.split('').reverse().join('')); };
+const xKids = (n, name) => Array.from(n.children).filter((c) => c.localName === name);
+const xDig = (n, path) => path.split('/').reduce((cur, p) => cur.flatMap((x) => xKids(x, p)), [n]);
+const xTx = (n, path) => { const r = n ? xDig(n, path)[0] : null; return r ? r.textContent.trim() : ''; };
+const xAnag = (n) => { if (!n) return { nome: '', piva: '' }; const d = xDig(n, 'DatiAnagrafici')[0]; if (!d) return { nome: '', piva: '' }; const den = xTx(d, 'Anagrafica/Denominazione'), pn = (xTx(d, 'Anagrafica/Cognome') + ' ' + xTx(d, 'Anagrafica/Nome')).trim(); return { nome: den || pn, piva: xTx(d, 'IdFiscaleIVA/IdCodice') || xTx(d, 'CodiceFiscale') }; };
+function xmlDaBytes(bytes) {
+  const txt = new TextDecoder('utf-8').decode(bytes), re = /<\/(?:[A-Za-z0-9_]+:)?FatturaElettronica>/g;
+  let end = -1, m; while ((m = re.exec(txt))) end = m.index + m[0].length;
+  if (end < 0) throw new Error('Non è una fattura elettronica');
+  let st = txt.indexOf('<?xml'); const st2 = txt.search(/<(?:[A-Za-z0-9_]+:)?FatturaElettronica[\s>]/);
+  if (st < 0 || st > st2) st = st2;
+  return txt.slice(st, end);
+}
+function parseFatture(xml, dir) {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('XML non valido');
+  const root = doc.documentElement, head = xKids(root, 'FatturaElettronicaHeader')[0];
+  const ced = xAnag(head && xDig(head, 'CedentePrestatore')[0]), ces = xAnag(head && xDig(head, 'CessionarioCommittente')[0]);
+  const out = xKids(root, 'FatturaElettronicaBody').map((b) => {
+    const dg = 'DatiGenerali/DatiGeneraliDocumento/', td = xTx(b, dg + 'TipoDocumento'), sg = td === 'TD04' ? -1 : 1;
+    const imp = sum(xDig(b, 'DatiBeniServizi/DatiRiepilogo'), (r) => num(xTx(r, 'ImponibileImporto'))), iva = sum(xDig(b, 'DatiBeniServizi/DatiRiepilogo'), (r) => num(xTx(r, 'Imposta')));
+    const tot = num(xTx(b, dg + 'ImportoTotaleDocumento')) || (imp + iva);
+    const sc = xDig(b, 'DatiPagamento/DettaglioPagamento').map((r) => xTx(r, 'DataScadenzaPagamento')).filter(Boolean).sort()[0] || '';
+    const causale = xDig(b, dg + 'Causale').map((x) => x.textContent.trim()).join(' '), linee = xDig(b, 'DatiBeniServizi/DettaglioLinee').slice(0, 3).map((l) => xTx(l, 'Descrizione')).join(' · ');
+    const ordine = xDig(b, 'DatiGenerali/DatiOrdineAcquisto/IdDocumento').map((x) => x.textContent.trim()).join(' ');
+    const cp = dir === 'P' ? ced : ces;
+    return { dir: dir, numero: xTx(b, dg + 'Numero'), data: xTx(b, dg + 'Data'), tipoDoc: td, controparte: cp.nome, piva: cp.piva, imponibile: Math.round(sg * imp * 100) / 100, iva: Math.round(sg * iva * 100) / 100, tot: Math.round(sg * tot * 100) / 100, scadenza: sc, descrizione: [causale, linee].filter(Boolean).join(' — ').slice(0, 400), pagata: false, importatoIl: today(), _testo: [causale, linee, ordine].join(' ') };
+  });
+  if (!out.length) throw new Error('Fattura senza corpo');
+  return out;
+}
+async function unzipFile(buf) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf); let e = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+  if (e < 0) throw new Error('ZIP non valido');
+  const n = dv.getUint16(e + 10, true); let off = dv.getUint32(e + 16, true); const out = [];
+  for (let k = 0; k < n; k++) {
+    if (dv.getUint32(off, true) !== 0x02014b50) break;
+    const meth = dv.getUint16(off + 10, true), csz = dv.getUint32(off + 20, true), nl = dv.getUint16(off + 28, true), xl = dv.getUint16(off + 30, true), cl = dv.getUint16(off + 32, true), lo = dv.getUint32(off + 42, true);
+    const name = new TextDecoder().decode(u8.subarray(off + 46, off + 46 + nl)); off += 46 + nl + xl + cl;
+    if (name.endsWith('/')) continue;
+    const st = lo + 30 + dv.getUint16(lo + 26, true) + dv.getUint16(lo + 28, true), comp = u8.subarray(st, st + csz);
+    if (meth === 0) out.push({ name: name.split('/').pop(), data: comp.slice() });
+    else if (meth === 8) out.push({ name: name.split('/').pop(), data: new Uint8Array(await new Response(new Blob([comp]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()) });
+  }
+  return out;
+}
+const commessaDaTesto = (t) => { const c = D('commesse').find((x) => x.codice && new RegExp('(^|[^0-9A-Za-z])' + String(x.codice).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^0-9A-Za-z])', 'i').test(t)); return c ? c.id : ''; };
+async function importaFatture(files, dir) {
+  const st = { n: 0, dup: 0, err: 0, noFile: 0, auto: 0 }, items = [], visti = new Set();
+  toast('Importo le fatture…');
+  for (const f of files) {
+    try { const buf = await f.arrayBuffer(); if (/\.zip$/i.test(f.name)) { for (const e of await unzipFile(buf)) if (/\.(xml|p7m)$/i.test(e.name)) items.push({ name: e.name, bytes: e.data }); } else items.push({ name: f.name, bytes: new Uint8Array(buf) }); } catch (e) { st.err++; }
+  }
+  for (const it of items) {
+    try {
+      const list = parseFatture(xmlDaBytes(it.bytes), dir); let file = null, tentato = false;
+      for (const r of list) {
+        const id = fattId(r); if (G('fatture', id) || visti.has(id)) { st.dup++; continue; } visti.add(id);
+        if (!tentato) { tentato = true; try { file = await uploadFile(new File([it.bytes], it.name, { type: 'application/xml' }), fattPath(dir, r.data)); } catch (e) { file = null; st.noFile++; } }
+        const cid = commessaDaTesto(r._testo); delete r._testo; if (cid) { r.commessaId = cid; st.auto++; }
+        await put('fatture', id, Object.assign(r, { file: file })); st.n++;
+      }
+    } catch (e) { st.err++; }
+  }
+  toast('Fatture importate: ' + st.n + (st.auto ? ' (' + st.auto + ' collegate a una commessa)' : '') + (st.dup ? ' · già presenti: ' + st.dup : '') + (st.err ? ' · non lette: ' + st.err : '') + (st.noFile ? ' · file non caricato su Drive: ' + st.noFile : ''), st.err || st.noFile ? 'err' : '');
+}
+A.fatImport = () => {
+  const dir = S.ftab === 'A' ? 'A' : 'P', inp = document.createElement('input');
+  inp.type = 'file'; inp.multiple = true; inp.accept = '.xml,.p7m,.zip';
+  inp.onchange = () => { importaFatture(Array.from(inp.files), dir); };
+  inp.click();
+};
+A.ftab = (d) => { S.ftab = d.t; queueRender(); };
+A.ffil = (d) => { S.ffil = d.f; queueRender(); };
+const fatFields = () => [{ k: 'numero', l: 'Numero fattura', req: true, half: true }, { k: 'data', l: 'Data', t: 'date', req: true, half: true }, { k: 'controparte', l: 'Fornitore / cliente', req: true }, { k: 'piva', l: 'P.IVA', half: true }, { k: 'scadenza', l: 'Scadenza pagamento', t: 'date', half: true }, { k: 'imponibile', l: 'Imponibile (€)', t: 'number', half: true }, { k: 'iva', l: 'IVA (€)', t: 'number', half: true }, { k: 'tot', l: 'Totale (€)', t: 'number', req: true, half: true }, { k: 'commessaId', l: 'Commessa', t: 'select', half: true, opts: D('commesse').sort((a, b) => String(b.codice).localeCompare(String(a.codice))).map((c) => [c.id, commessaLabel(c)]) }, { k: 'generale', l: 'Spesa generale (non legata a una commessa)', t: 'checkbox' }, { k: 'pagata', l: 'Già pagata / incassata', t: 'checkbox', half: true }, { k: 'dataPagamento', l: 'Data del pagamento', t: 'date', half: true }, { k: 'descrizione', l: 'Causale / descrizione', t: 'textarea', rows: 2 }, { k: 'note', l: 'Note', t: 'textarea', rows: 2 }, { k: 'file', l: 'File della fattura (XML o PDF)', t: 'file' }];
+const fatNorm = (v) => { const o = Object.assign({}, v); ['imponibile', 'iva', 'tot'].forEach((k) => { o[k] = Math.round(num(o[k]) * 100) / 100; }); if (!o.tot) o.tot = Math.round((o.imponibile + o.iva) * 100) / 100; if (!o.imponibile && o.tot && !o.iva) o.imponibile = o.tot; if (o.commessaId) o.generale = false; return o; };
+A.fatNew = () => openForm({ title: S.ftab === 'A' ? 'Nuova fattura attiva' : 'Nuova fattura passiva', wide: true, fields: fatFields(), values: { data: today() }, folder: (out) => fattPath(S.ftab === 'A' ? 'A' : 'P', out.data), onSave: (v) => put('fatture', newId('fatture'), Object.assign(fatNorm(v), { dir: S.ftab === 'A' ? 'A' : 'P', importatoIl: today() })) });
+A.fatEdit = (d) => { const x = G('fatture', d.id); if (!x) return; openForm({ title: 'Fattura ' + (x.numero || ''), wide: true, fields: fatFields(), values: x, folder: fattPath(x.dir, x.data), onSave: (v) => patch('fatture', x.id, fatNorm(v)), onDelete: () => remove('fatture', x.id) }); };
+function vFatture() {
+  if (S.tab === 'A' || S.tab === 'P') { S.ftab = S.tab; S.tab = null; }
+  const dir = S.ftab === 'A' ? 'A' : 'P', fil = S.ffil || 'tutte', q = String(S.q || '').toLowerCase();
+  const tutte = D('fatture').filter((f) => f.dir === dir), aperte = tutte.filter((f) => !f.pagata), scad = aperte.filter((f) => f.scadenza && f.scadenza < today());
+  const senza = tutte.filter((f) => !f.commessaId && !f.generale), mese = today().slice(0, 7);
+  const filtri = { tutte: tutte, aperte: aperte, scadute: scad, senza: senza };
+  const rows = (filtri[fil] || tutte).filter((f) => !q || ((f.controparte || '') + ' ' + (f.numero || '') + ' ' + (f.descrizione || '')).toLowerCase().includes(q)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+  const chip = (k, t, n) => '<button class="btn sm' + (fil === k ? ' p' : '') + '" data-a="ffil" data-f="' + k + '">' + t + ' (' + n + ')</button>';
+  const t = tbl([{ h: 'Data', f: (f) => esc(fmtD(f.data)) }, { h: 'N.', f: (f) => esc(f.numero) }, { h: dir === 'P' ? 'Fornitore' : 'Cliente', f: (f) => '<b>' + esc(f.controparte) + '</b>' + (f.tipoDoc === 'TD04' ? ' ' + bd('Nota di credito', 'grey') : '') + (f.descrizione ? '<div class="small muted">' + esc(String(f.descrizione).slice(0, 80)) + '</div>' : '') }, { h: 'Imponibile', r: true, f: (f) => eur2(f.imponibile) }, { h: 'IVA', r: true, f: (f) => eur2(f.iva) }, { h: 'Totale', r: true, f: (f) => '<b>' + eur2(f.tot) + '</b>' }, { h: 'Scadenza', f: (f) => esc(fmtD(f.scadenza)) }, { h: 'Commessa', f: (f) => { const c = f.commessaId && G('commesse', f.commessaId); return c ? esc(commessaLabel(c)) : f.generale ? bd('Spesa generale', 'grey') : bd('Da collegare', 'amber'); } }, { h: 'Stato', f: fatStato }, { h: 'File', f: (f) => fileLink(f.file) }], rows, { empty: dir === 'P' ? 'Nessuna fattura passiva. Importa gli XML dei fornitori con «Importa XML o ZIP».' : 'Nessuna fattura attiva. Importa gli XML emessi con «Importa XML o ZIP».', row: (f) => 'data-a="fatEdit" data-id="' + esc(f.id) + '"' });
+  const tabs = '<div class="tabs" role="tablist">' + [['P', 'Passive (fornitori)'], ['A', 'Attive (clienti)']].map((x) => '<button class="tab' + (dir === x[0] ? ' on' : '') + '" data-a="ftab" data-t="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
+  return pageHead('Fatture', 'Fatture elettroniche passive e attive. Le passive collegate a una commessa entrano nei suoi costi; le scadenze compaiono nel calendario.', '<button class="btn" data-a="fatNew">+ Fattura manuale</button><button class="btn p" data-a="fatImport">Importa XML o ZIP</button>') + tabs +
+    '<div class="grid g4" style="margin-bottom:14px">' + kpi(dir === 'P' ? 'Da pagare' : 'Da incassare', eur2(sum(aperte, (f) => f.tot)), aperte.length + ' fatture') + kpi('Scadute', eur2(sum(scad, (f) => f.tot)), scad.length + ' fatture') + kpi('Questo mese', eur2(sum(tutte.filter((f) => String(f.data).slice(0, 7) === mese), (f) => f.tot)), 'Totale fatturato nel mese') + kpi('Da collegare', String(senza.length), 'Senza commessa né «spesa generale»') + '</div>' +
+    '<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px">' + chip('tutte', 'Tutte', tutte.length) + chip('aperte', dir === 'P' ? 'Da pagare' : 'Da incassare', aperte.length) + chip('scadute', 'Scadute', scad.length) + chip('senza', 'Da collegare', senza.length) + '<input id="q" data-in="q" placeholder="Cerca fattura" aria-label="Cerca" value="' + esc(S.q) + '" style="margin-left:auto;max-width:240px"></div>' +
+    '<section class="card">' + t + '</section><p class="small muted" style="margin-top:10px">Importazione automatica dal software di fatturazione (DocEasy): in preparazione. Intanto puoi caricare a mano gli XML (anche firmati .p7m o in uno ZIP): ogni fattura già presente non viene duplicata.</p>';
+}
+
 /* ---------- avvio ---------- */
 /* archivio automatico (solo amministratore, in sottofondo): sposta nelle cartelle "Scaduti" di Drive
    i file dei corsi vecchi del personale (sostituiti da uno più recente dello stesso tipo), delle
@@ -3478,6 +3644,25 @@ async function sweepArchivio() {
         archTried.delete('m' + m.id); await patch('mezzi', m.id, { fileArchiviati: false });
       }
     }
+    if (S.loaded.docAzienda && S.loaded.assicurazioni) {
+      const best = {}, keyD = (x) => x.dataEmissione || x.dataScadenza || '';
+      D('docAzienda').forEach((x) => { if (x.archiviato || x.tipo === 'ALTRO' || !keyD(x)) return; if (!best[x.tipo] || keyD(x) > best[x.tipo]) best[x.tipo] = keyD(x); });
+      for (const x of D('docAzienda').filter((y) => !y.archiviato && y.tipo !== 'ALTRO' && keyD(y) && keyD(y) < best[y.tipo] && !archTried.has('d' + y.id))) {
+        archTried.add('d' + x.id); await sposta(x.file, ['Azienda', FOLD_DOCIMP]); await patch('docAzienda', x.id, { archiviato: true, archiviatoIl: today() });
+      }
+      const bestA = {}, kA = (x) => x.tipo + '|' + String(x.compagnia || '').toLowerCase().trim();
+      const imp = D('assicurazioni').filter((x) => !x.mezzoId && !x.commessaId && x.tipo !== 'ALTRO' && x.dataScadenza);
+      imp.forEach((x) => { if (x.archiviato) return; if (!bestA[kA(x)] || x.dataScadenza > bestA[kA(x)]) bestA[kA(x)] = x.dataScadenza; });
+      for (const x of imp.filter((y) => !y.archiviato && y.dataScadenza < bestA[kA(y)] && !archTried.has('a' + y.id))) {
+        archTried.add('a' + x.id); await sposta(x.file, ['Azienda', FOLD_ASSIMP]); await sposta(x.quietanza, ['Azienda', FOLD_ASSIMP]); await patch('assicurazioni', x.id, { archiviato: true, archiviatoIl: today() });
+      }
+    }
+    if (S.loaded.documenti) {
+      for (const x of tuttiDoc().filter((y) => y.scadenza && y.scadenza < today() && !y.archiviato && !y.commessaId && !archTried.has('x' + y.id))) {
+        archTried.add('x' + x.id);
+        await sposta(x.file, docFolderPath(null)(x)); await patch(colDoc(x), x.id, { archiviato: true, archiviatoIl: today() });
+      }
+    }
     if (n) toast('Archiviati ' + n + ' file vecchi nelle cartelle Scaduti su Drive.');
   } catch (e) { /* riprova al prossimo aggiornamento dei dati */ }
   finally { archSweeping = false; }
@@ -3492,7 +3677,7 @@ function subscribe(col) {
     if (col === 'categorie' || col === 'impostazioni') seedCategorieDefault();
     if (col === 'tipiLavoro' || col === 'impostazioni' || col === 'commesse') seedTipiLavoroDefault();
     if (col === 'mezzi' || col === 'impostazioni') migraScadenzeMezziDaiCampi();
-    if (col === 'mezzi' || col === 'dipendenti' || col === 'assicurazioni') setTimeout(sweepArchivio, 1500);
+    if (col === 'mezzi' || col === 'dipendenti' || col === 'assicurazioni' || col === 'docAzienda' || col === 'documenti') setTimeout(sweepArchivio, 1500);
   }, (err) => { console.warn('db', col, err); S.data[col] = S.data[col] || {}; S.loaded[col] = true; queueRender(); });
 }
 /* la prima volta che l'amministratore arriva su Documentale senza aver ancora creato nessuna
@@ -3503,13 +3688,9 @@ function subscribe(col) {
    categorieSeed) così una categoria di base che l’amministratore ha eliminato di proposito
    non torna indietro da sola al giro successivo. */
 const DEFAULT_CATEGORIE = [
-  { nome: 'Sicurezza', figli: ['Procedure e istruzioni di sicurezza', 'DPI e schede tecniche', 'Formazione e corsi'] },
-  { nome: 'Certificazioni', figli: ['Certificazioni di prodotto', 'Certificazioni di sistema (ISO…)'] },
-  { nome: 'Sostenibilità', figli: ['Politiche e report', 'Gestione rifiuti'] },
-  { nome: 'Amministrazione e contabilità', figli: ['Contratti e corrispondenza', 'Fatture e documenti contabili', 'Adempimenti fiscali e tributari'] },
-  { nome: 'Bilancio', figli: ['Bilanci annuali', 'Situazioni contabili periodiche'] },
-  { nome: 'DDT', figli: ['DDT fornitori (in entrata)', 'DDT clienti (in uscita)'] },
-  { nome: 'Rapporti Banche', figli: ['Estratti conto', 'Contratti e fidi bancari', 'Corrispondenza con la banca'] },
+  { nome: '02 Amministrazione e contabilità', figli: ['Bilanci e dichiarazioni', 'Prima nota e contabilità', 'Fatture generali', 'Banche e finanziamenti', 'Enti e corrispondenza'] },
+  { nome: '03 Contratti', figli: ['Locazioni', 'Fornitori', 'Noleggi e leasing', 'Consulenti', 'Clienti quadro', 'Altri contratti'] },
+  { nome: '04 Sistema qualità e sicurezza', figli: ['Certificazioni ISO e audit', 'Riunioni periodiche e verbali', 'DVR, procedure e nomine sicurezza', 'Controllo cestello e attrezzature', 'Sostenibilità e rifiuti'] },
   { nome: 'Altri documenti', figli: ['Altro'] }
 ];
 let categorieSeeding = false, categorieSeedTentata = false;
