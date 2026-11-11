@@ -2561,7 +2561,8 @@ const ROOT_COLLAPSE = {
 };
 const SUB_MAP = {
   'amministrazione e contabilita/contratti e corrispondenza': [CAT_03, 'Altri contratti'],
-  'amministrazione e contabilita/fatture e documenti contabili': [CAT_02, 'Fatture generali'],
+  'amministrazione e contabilita/fatture e documenti contabili': [CAT_02, 'Prima nota e contabilità'],
+  '02 amministrazione e contabilita/fatture generali': [CAT_02, 'Prima nota e contabilità'],
   'amministrazione e contabilita/adempimenti fiscali e tributari': [CAT_02, 'Bilanci e dichiarazioni'],
   'amministrazione e contabilita/prima nota': [CAT_02, 'Prima nota e contabilità']
 };
@@ -3716,7 +3717,7 @@ function subscribe(col) {
    categorieSeed) così una categoria di base che l’amministratore ha eliminato di proposito
    non torna indietro da sola al giro successivo. */
 const DEFAULT_CATEGORIE = [
-  { nome: '02 Amministrazione e contabilità', figli: ['Bilanci e dichiarazioni', 'Prima nota e contabilità', 'Fatture generali', 'Banche e finanziamenti', 'Enti e corrispondenza'] },
+  { nome: '02 Amministrazione e contabilità', figli: ['Bilanci e dichiarazioni', 'Prima nota e contabilità', 'Banche e finanziamenti', 'Enti e corrispondenza'] },
   { nome: '03 Contratti', figli: ['Locazioni', 'Fornitori', 'Noleggi e leasing', 'Consulenti', 'Clienti quadro', 'Altri contratti'] },
   { nome: '04 Sistema qualità e sicurezza', figli: ['Certificazioni ISO e audit', 'Riunioni periodiche e verbali', 'DVR, procedure e nomine sicurezza', 'Controllo cestello e attrezzature', 'Sostenibilità e rifiuti'] },
   { nome: 'Altri documenti', figli: ['Altro'] }
