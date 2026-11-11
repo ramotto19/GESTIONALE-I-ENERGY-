@@ -1875,7 +1875,6 @@ function validaRiga(r, altre) {
     if (u <= i) return 'L\u2019uscita deve essere dopo l\u2019ingresso.';
     if (p < 0 || p >= u - i) return 'La pausa deve essere più breve del turno.';
     if ((Number(r.tr) || 0) > 600) return 'Il tragitto non può superare 10 ore.';
-    if (String(r.a || '').trim().length < 3) return 'Descrivi le attività svolte.';
     if (altre.some((x) => x.id !== r.id && x.d === r.d && tipoR(x) === 'L' && hm(x.i) != null && hm(x.u) != null && i < hm(x.u) && hm(x.i) < u)) return 'Questo orario si sovrappone a un altro inserimento dello stesso giorno.';
   } else { const o = Number(r.o) || 0; if (o <= 0 || o > 24) return 'Indica le ore di assenza (da 0,5 a 24).'; }
   return '';
@@ -2064,7 +2063,7 @@ function rigaFields(u) {
     { k: 'eoloA', l: 'Attivazioni EOLO', t: 'number', half: true, def: 0 },
     { k: 'eoloG', l: 'Guasti EOLO', t: 'number', half: true, def: 0 },
     { k: 'eoloK', l: 'KO EOLO', t: 'number', half: true, def: 0 },
-    { k: 'a', l: 'Descrizione dei lavori svolti', t: 'textarea', rows: 4 }
+    { k: 'a', l: 'Descrizione dei lavori svolti (facoltativa)', t: 'textarea', rows: 4 }
   ];
 }
 function apriRiga(u, m, id, d) {
