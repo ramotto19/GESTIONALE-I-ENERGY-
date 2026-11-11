@@ -2107,6 +2107,10 @@ function vOre() {
     rs.map((r) => '<tr class="clk" data-a="orePers" data-u="' + esc(r.a.id) + '"><td><b>' + esc(r.nome) + '</b>' + (r.om.manc && m < meseOggi() ? '<div class="small" style="color:#b45309">Mancano ' + fmtMin(r.om.manc) + '</div>' : '') + '</td><td class="r">' + r.om.giorni + '</td><td class="r"><b>' + fmtMin(r.om.lavoro) + '</b></td><td class="r">' + fmtMin(r.om.tr) + '<div class="small muted">' + fmtMin(r.om.trRaw) + ' effettive</div></td><td class="r">' + fmtMin(r.om.assenze) + '</td><td class="r">' + fmtMin(r.om.ord) + '</td><td class="r"><b>' + fmtMin(r.om.str) + '</b></td><td class="small">' + (r.eo.tot ? esc(eoloTxt(r.eo)) : '<span class="muted">—</span>') + '</td><td>' + bd(r.st.t, r.st.c) + '</td><td class="r">' + (r.st.k === 'ok' ? '<button class="btn sm" data-a="oreRiapri" data-u="' + esc(r.a.id) + '">Riapri</button>' : r.righe.length ? '<button class="btn sm" data-a="oreAppr" data-u="' + esc(r.a.id) + '">Approva</button>' : '') + '</td></tr>').join('') +
     '<tr><td><b>Totale</b></td><td></td><td class="r"><b>' + fmtMin(tot.L) + '</b></td><td class="r">' + fmtMin(tot.T) + '</td><td class="r">' + fmtMin(tot.A) + '</td><td class="r">' + fmtMin(tot.O) + '</td><td class="r"><b>' + fmtMin(tot.S) + '</b></td><td class="small">' + esc(eoloTxt(rs.reduce((t, r) => ({ M: t.M + r.eo.M, A: t.A + r.eo.A, G: t.G + r.eo.G, K: t.K + r.eo.K }), { M: 0, A: 0, G: 0, K: 0 }))) + '</td><td></td><td></td></tr></tbody></table></div>' : '<div class="empty">Nessun account collegato. Apri la scheda Accessi per collegare i dipendenti.</div>') + '</section>';
   h += '<p class="small muted" style="margin-top:12px">Ore ordinarie = lavoro + tragitto (al ' + par.tragitto + '%) fino alle ore dovute, ridotte da ferie, permessi e malattia. <button class="lnk" data-a="oreParam">Parametri del calcolo</button></p>';
+  const daAprire = D('dipendenti').filter((d) => d.attivo !== false && G('accessi', d.id + '@interno') && /^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(String(d.email || '').trim()) && !G('accessi', String(d.email).trim().toLowerCase()));
+  if (daAprire.length) h += '<section class="card" style="margin-top:14px"><h2>Registro compilato da te: ora hanno un’email</h2>' + daAprire.map((d) => '<div class="blk"><div style="flex:1"><b>' + esc(nomeD(d).trim()) + '</b><div class="small muted">Email ' + esc(d.email) + ': dando l’accesso, le ore che hai già registrato passano nella sua pagina.</div></div><button class="btn sm p" data-a="oreAbilita" data-id="' + esc(d.id) + '">Dai accesso</button></div>').join('') + '</section>';
+  const passa = D('accessi').filter((a) => a.interno && a.dipendenteId).map((a) => ({ a, d: G('dipendenti', a.dipendenteId) })).filter((x) => x.d && /^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(String(x.d.email || '').trim()));
+  if (passa.length) h += '<section class="card" style="margin-top:14px"><h2>Registro interno: ora hanno l’email</h2>' + passa.map((x) => '<div class="blk"><div style="flex:1"><b>' + esc(nomeD(x.d).trim()) + '</b><div class="small muted">Email ' + esc(x.d.email) + '. Dando l’accesso, le ore che hai già inserito passano al suo account e le vedrà nella sua pagina.</div></div><button class="btn sm p" data-a="orePassa" data-u="' + esc(x.a.id) + '">Dai accesso e porta le ore</button></div>').join('') + '</section>';
   if (senza.length) h += '<section class="card" style="margin-top:14px"><h2>Dipendenti senza registro ore (' + senza.length + ')</h2>' + senza.map((d) => { const em = String(d.email || '').trim(); return '<div class="blk"><div style="flex:1"><b>' + esc(nomeD(d).trim()) + '</b><div class="small muted">' + (em ? 'Email ' + esc(em) + ': potrà entrare con Google e compilare le sue ore.' : 'Nessuna email nella scheda: le ore le compili tu per lui/lei. Se aggiungi l’email nella scheda potrà accedere.') + '</div></div><button class="btn sm p" data-a="oreAbilita" data-id="' + esc(d.id) + '">' + (em ? 'Dai accesso' : 'Abilita registro') + '</button></div>'; }).join('') + '</section>';
   return h;
 }
@@ -2114,11 +2118,46 @@ A.oreAbilita = async (d) => {
   const dip = G('dipendenti', d.id); if (!dip) return;
   const em = String(dip.email || '').trim().toLowerCase(), nome = nomeD(dip).trim();
   if (em && !/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(em)) { toast('L’email nella scheda di ' + nome + ' non è valida: correggila e riprova.', 'err'); return; }
-  const id = em || (dip.id + '@interno');
+  const interno = dip.id + '@interno', vecchio = G('accessi', interno), id = em || interno;
   if (G('accessi', id)) { toast('Questa persona ha già un accesso.', 'err'); return; }
-  if (!(await confirmBox(em ? 'Dare accesso a ' + nome + ' con l’indirizzo ' + em + '? Potrà entrare nel gestionale con Google e vedere solo le proprie ore, i corsi e i documenti personali.' : 'Abilitare il registro ore di ' + nome + '? Non avendo un’email non potrà entrare: le ore le registri tu.', em ? 'Dai accesso' : 'Abilita'))) return;
-  await put('accessi', id, em ? { ruolo: 'dipendente', dipendenteId: dip.id, creatoIl: today() } : { ruolo: 'dipendente', dipendenteId: dip.id, creatoIl: today(), interno: true });
+  if (!(await confirmBox(em ? 'Dare accesso a ' + nome + ' con l’indirizzo ' + em + '? Potrà entrare nel gestionale con Google e vedrà solo le proprie ore, i corsi e i documenti personali.' + (vecchio ? ' Le ore che hai già registrato per lui/lei passeranno nella sua pagina.' : '') : 'Abilitare il registro ore di ' + nome + '? Non avendo un’email non potrà entrare: le ore le registri tu.', em ? 'Dai accesso' : 'Abilita'))) return;
+  const nuovo = em ? { ruolo: 'dipendente', dipendenteId: dip.id, creatoIl: today() } : { ruolo: 'dipendente', dipendenteId: dip.id, creatoIl: today(), interno: true };
+  if (vecchio && em) {
+    /* le ore registrate dall'amministratore stanno sotto la chiave interna: le copio sotto l'email, mese per mese, e porto con sé le approvazioni */
+    let n = 0;
+    for (let k = 0; k <= 36; k++) {
+      const m = addMese(meseOggi(), -k);
+      try { const snap = await db.doc('ore/' + interno + '/mesi/' + m).get(); const rr = (snap.exists && snap.data() && snap.data().righe) || []; if (rr.length) { await put('ore/' + em + '/mesi', m, { righe: rr, aggiornato: today() }); n++; } } catch (e) { /* mese senza dati */ }
+    }
+    if (vecchio.approvati) nuovo.approvati = vecchio.approvati;
+    await put('accessi', id, nuovo);
+    try { await remove('accessi', interno); } catch (e) { /* resta il vecchio, senza conseguenze */ }
+    toast('Accesso dato a ' + nome + '. Ore passate alla sua pagina: ' + n + (n === 1 ? ' mese.' : ' mesi.')); loadAllOre(S.mese || meseOggi()); return;
+  }
+  await put('accessi', id, nuovo);
   toast('Fatto: ora ' + nome + ' compare nel registro ore.'); loadAllOre(S.mese || meseOggi());
+};
+/* da registro interno (ore/<id>@interno) ad accesso reale con email: le ore e le approvazioni seguono la persona */
+A.orePassa = async (d) => {
+  const old = G('accessi', d.u), dip = old && G('dipendenti', old.dipendenteId); if (!old || !dip) return;
+  const mail = String(dip.email || '').trim().toLowerCase(), nome = nomeD(dip).trim();
+  if (!/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(mail)) { toast('L’email nella scheda di ' + nome + ' non è valida.', 'err'); return; }
+  if (G('accessi', mail)) { toast('Questo indirizzo ha già un accesso.', 'err'); return; }
+  if (!(await confirmBox('Dare accesso a ' + nome + ' con ' + mail + ' e portare sul suo account le ore che hai inserito? Vedrà solo le proprie ore, i corsi e i documenti personali.', 'Dai accesso'))) return;
+  try {
+    let n = 0;
+    for (let k = -30; k <= 1; k++) {
+      const m = addMese(meseOggi(), k);
+      let snap; try { snap = await db.doc('ore/' + old.id + '/mesi/' + m).get(); } catch (e) { continue; }
+      const righe = (snap.exists && snap.data() && snap.data().righe) || []; if (!righe.length) continue;
+      let gia = []; try { const s2 = await db.doc('ore/' + mail + '/mesi/' + m).get(); gia = (s2.exists && s2.data() && s2.data().righe) || []; } catch (e) { gia = []; }
+      await put('ore/' + mail + '/mesi', m, { righe: ordina(gia.concat(righe)), aggiornato: today() });
+      await db.doc('ore/' + old.id + '/mesi/' + m).delete(); n++;
+    }
+    await put('accessi', mail, { ruolo: 'dipendente', dipendenteId: dip.id, creatoIl: today(), approvati: old.approvati || {} });
+    await remove('accessi', old.id);
+    toast('Accesso dato a ' + nome + (n ? '; ore portate sul suo account: ' + n + (n === 1 ? ' mese.' : ' mesi.') : '.')); S.oreAll = {}; loadAllOre(S.mese || meseOggi());
+  } catch (e) { toast('Passaggio non riuscito: ' + errMsg(e) + ' Riprova: nulla è stato perso.', 'err'); }
 };
 A.otab = (d) => { S.otab = d.t; if (d.t === 'riepilogo') loadAllOre(S.mese || meseOggi()); queueRender(); };
 A.oreRefresh = () => loadAllOre(S.mese || meseOggi());
