@@ -1819,7 +1819,7 @@ function oreTot(righe) {
    Ore dovute nel mese = giorni lavorativi (lun-ven, esclusi i festivi) × ore al giorno.
    Ferie, permessi e malattia riducono le ore da lavorare. Il tragitto conta al 70% (modificabile).
    Ore ordinarie = lavoro + tragitto al 70% fino alle ore da lavorare; il resto sono straordinari. */
-const OREPAR = () => { const c = (S.admin ? G('impostazioni', 'ore') : (G('accessi', S.uid) || {}).oreCfg) || {}, ok = (v) => v !== '' && v != null && !isNaN(+v); return { oreGiorno: ok(c.oreGiorno) && +c.oreGiorno > 0 ? +c.oreGiorno : 8, tragitto: ok(c.tragitto) ? Math.min(100, Math.max(0, +c.tragitto)) : 85, festivi: String(c.festivi || '') }; };
+const OREPAR = () => { const c = (S.admin ? G('impostazioni', 'ore') : (G('accessi', S.uid) || {}).oreCfg) || {}, ok = (v) => v !== '' && v != null && !isNaN(+v); return { oreGiorno: ok(c.oreGiorno) && +c.oreGiorno > 0 ? +c.oreGiorno : 8, tragitto: ok(c.tragitto) ? Math.min(100, Math.max(0, +c.tragitto)) : 85, festivi: String(c.festivi || ''), tolleranza: ok(c.tolleranza) && +c.tolleranza >= 0 ? +c.tolleranza : 0 }; };
 function pasquaDi(y) { const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), mese = Math.floor((h + l - 7 * m + 114) / 31), gg = ((h + l - 7 * m + 114) % 31) + 1; return new Date(y, mese - 1, gg); }
 function festiviDi(y) {
   const iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -2095,6 +2095,44 @@ A.oreEdit = (d) => apriRiga(d.u, d.m, d.id, null);
 
 /* ---------- ore del personale (amministrazione) ---------- */
 function righeAcc(m) { return D('accessi').filter((a) => a.dipendenteId).map((a) => { const righe = ((S.oreAll[a.id + '|' + m] || {}).righe) || []; return { a: a, nome: nomeAcc(a), righe: righe, x: oreTot(righe), eo: eoloTot(righe), st: stBase(a.id, m, righe) }; }).sort(byStr((r) => r.nome)); }
+
+/* ---------- controllo incrociato: stessa commessa, stesso giorno, ore diverse ---------- */
+const hashC = (t) => { let h = 5381; String(t).split('').forEach((ch) => { h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0; }); return h.toString(36); };
+function ctrlOre(m) {
+  const map = {}, tol = OREPAR().tolleranza, ver = (G('impostazioni', 'oreVerifiche') || {}).items || {};
+  righeAcc(m).forEach((r) => r.righe.forEach((x) => {
+    if (tipoR(x) !== 'L' || !x.c) return;
+    const mn = minRiga(x); if (mn <= 0) return;
+    const key = x.d + '_' + hashC(x.c), g = map[key] || (map[key] = { key: key, d: x.d, c: x.c, p: {} });
+    const p = g.p[r.a.id] || (g.p[r.a.id] = { id: r.a.id, nome: r.nome, min: 0 }); p.min += mn;
+  }));
+  const out = [];
+  Object.keys(map).forEach((k) => {
+    const g = map[k], ps = Object.keys(g.p).map((i) => g.p[i]).sort(byStr((p) => p.nome));
+    if (ps.length < 2) return;
+    const diff = Math.max.apply(null, ps.map((p) => p.min)) - Math.min.apply(null, ps.map((p) => p.min));
+    if (diff <= tol) return;
+    const sig = ps.map((p) => p.id + ':' + p.min).join(','), v = ver[g.key];
+    out.push({ key: g.key, d: g.d, c: g.c, ps: ps, diff: diff, sig: sig, st: v ? (v.sig === sig ? v.s : 'mod') : 'da', by: v && v.by, ts: v && v.ts });
+  });
+  return out.sort((a, b) => a.d.localeCompare(b.d) || a.c.localeCompare(b.c));
+}
+function cardCtrl(m) {
+  const l = ctrlOre(m); if (!l.length) return '<section class="card" style="margin-top:14px"><h2>Controllo ore sulla stessa commessa</h2><div class="small muted">Nessuna differenza: dove più persone hanno lavorato insieme nello stesso giorno, le ore corrispondono.</div></section>';
+  const rowH = (x) => {
+    const stH = x.st === 'ok' ? bd('Corretto', 'green') : x.st === 'ko' ? bd('Non corretto', 'red') : x.st === 'mod' ? bd('Ore cambiate dopo la verifica', 'amber') : bd('Da verificare', 'amber');
+    const btn = '<button class="btn sm" data-a="oreVer" data-k="' + esc(x.key) + '" data-s="ok">Corretto</button><button class="btn sm" data-a="oreVer" data-k="' + esc(x.key) + '" data-s="ko">Non corretto</button>' + (x.st === 'ok' || x.st === 'ko' ? '<button class="btn sm" data-a="oreVer" data-k="' + esc(x.key) + '" data-s="reset">Annulla</button>' : '');
+    return '<div class="blk" style="align-items:flex-start"><div style="flex:1"><b>Giorno ' + esc(fmtD(x.d)) + '</b> · ' + esc(x.c) + '<div class="small">' + x.ps.map((p, i) => 'dipendente ' + (i + 1) + ' (<button class="lnk" data-a="orePers" data-u="' + esc(p.id) + '">' + esc(p.nome) + '</button>) ' + fmtMin(p.min)).join(' · ') + '</div><div class="small"><b>Differenza di ' + fmtMin(x.diff) + ' ore</b> → verifica ' + stH + (x.ts && x.st !== 'da' ? ' <span class="muted">(' + esc(fmtD(x.ts)) + ')</span>' : '') + '</div></div><div class="row" style="gap:6px;flex-wrap:wrap">' + btn + '</div></div>';
+  };
+  const aperti = l.filter((x) => x.st === 'da' || x.st === 'mod' || x.st === 'ko'), chiusi = l.filter((x) => x.st === 'ok');
+  return '<section class="card" style="margin-top:14px"><h2>Controllo ore sulla stessa commessa (' + aperti.length + ' da risolvere)</h2><p class="small muted">Giorni in cui più persone hanno lavorato sulla stessa commessa ma con ore diverse. Segna ogni caso come corretto o non corretto: se poi le ore cambiano, torna da verificare.</p>' + (aperti.length ? aperti.map(rowH).join('') : '<div class="small muted">Tutto verificato.</div>') + (chiusi.length ? '<details style="margin-top:8px"><summary class="small">Già verificati come corretti (' + chiusi.length + ')</summary>' + chiusi.map(rowH).join('') + '</details>' : '') + '</section>';
+}
+A.oreVer = async (d) => {
+  const m = S.mese || meseOggi(), g = ctrlOre(m).find((x) => x.key === d.k); if (!g) return;
+  const items = Object.assign({}, (G('impostazioni', 'oreVerifiche') || {}).items || {});
+  if (d.s === 'reset') delete items[g.key]; else items[g.key] = { s: d.s, sig: g.sig, ts: today(), by: S.me || '' };
+  await put('impostazioni', 'oreVerifiche', { items: items });
+};
 function vOre() {
   const m = S.mese || meseOggi(), tab = S.otab || 'riepilogo';
   const tabs = '<div class="tabs" role="tablist">' + [['riepilogo', 'Riepilogo mensile'], ['accessi', 'Accessi']].map((t) => '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-a="otab" data-t="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
@@ -2108,6 +2146,7 @@ function vOre() {
   h += '<section class="card">' + (rs.length ? '<div class="scroll"><table class="tbl"><thead><tr><th>Persona</th><th class="r">Giorni</th><th class="r">Ore lavorate</th><th class="r">Tragitto (' + par.tragitto + '%)</th><th class="r">Assenze</th><th class="r">Ordinarie</th><th class="r">Straordinari</th><th>Interventi EOLO</th><th>Stato</th><th></th></tr></thead><tbody>' +
     rs.map((r) => '<tr class="clk" data-a="orePers" data-u="' + esc(r.a.id) + '"><td><b>' + esc(r.nome) + '</b>' + (r.om.manc && m < meseOggi() ? '<div class="small" style="color:#b45309">Mancano ' + fmtMin(r.om.manc) + '</div>' : '') + '</td><td class="r">' + r.om.giorni + '</td><td class="r"><b>' + fmtMin(r.om.lavoro) + '</b></td><td class="r">' + fmtMin(r.om.tr) + '<div class="small muted">' + fmtMin(r.om.trRaw) + ' effettive</div></td><td class="r">' + fmtMin(r.om.assenze) + '</td><td class="r">' + fmtMin(r.om.ord) + '</td><td class="r"><b>' + fmtMin(r.om.str) + '</b>' + (r.om.sab ? '<div class="small muted">di cui sabato ' + fmtMin(r.om.sab) + '</div>' : '') + '</td><td class="small">' + (r.eo.tot ? esc(eoloTxt(r.eo)) : '<span class="muted">—</span>') + '</td><td>' + bd(r.st.t, r.st.c) + '</td><td class="r">' + (r.st.k === 'ok' ? '<button class="btn sm" data-a="oreRiapri" data-u="' + esc(r.a.id) + '">Riapri</button>' : r.righe.length ? '<button class="btn sm" data-a="oreAppr" data-u="' + esc(r.a.id) + '">Approva</button>' : '') + '</td></tr>').join('') +
     '<tr><td><b>Totale</b></td><td></td><td class="r"><b>' + fmtMin(tot.L) + '</b></td><td class="r">' + fmtMin(tot.T) + '</td><td class="r">' + fmtMin(tot.A) + '</td><td class="r">' + fmtMin(tot.O) + '</td><td class="r"><b>' + fmtMin(tot.S) + '</b></td><td class="small">' + esc(eoloTxt(rs.reduce((t, r) => ({ M: t.M + r.eo.M, A: t.A + r.eo.A, G: t.G + r.eo.G, K: t.K + r.eo.K }), { M: 0, A: 0, G: 0, K: 0 }))) + '</td><td></td><td></td></tr></tbody></table></div>' : '<div class="empty">Nessun account collegato. Apri la scheda Accessi per collegare i dipendenti.</div>') + '</section>';
+  h += cardCtrl(m);
   h += '<p class="small muted" style="margin-top:12px">Ore ordinarie = lavoro + tragitto (al ' + par.tragitto + '%) fino alle ore dovute, ridotte da ferie, permessi e malattia. <button class="lnk" data-a="oreParam">Parametri del calcolo</button></p>';
   const daAprire = D('dipendenti').filter((d) => d.attivo !== false && G('accessi', d.id + '@interno') && /^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(String(d.email || '').trim()) && !G('accessi', String(d.email).trim().toLowerCase()));
   if (daAprire.length) h += '<section class="card" style="margin-top:14px"><h2>Registro compilato da te: ora hanno un’email</h2>' + daAprire.map((d) => '<div class="blk"><div style="flex:1"><b>' + esc(nomeD(d).trim()) + '</b><div class="small muted">Email ' + esc(d.email) + ': dando l’accesso, le ore che hai già registrato passano nella sua pagina.</div></div><button class="btn sm p" data-a="oreAbilita" data-id="' + esc(d.id) + '">Dai accesso</button></div>').join('') + '</section>';
@@ -2164,7 +2203,7 @@ A.orePassa = async (d) => {
 A.otab = (d) => { S.otab = d.t; if (d.t === 'riepilogo') loadAllOre(S.mese || meseOggi()); queueRender(); };
 A.oreRefresh = () => loadAllOre(S.mese || meseOggi());
 A.orePers = (d) => { if (d.u) { S.viewU = d.u; go('mieore'); } };
-A.oreParam = () => { const p = OREPAR(); openForm({ title: 'Parametri del calcolo ore', info: 'Valgono per tutti i dipendenti. Per un part-time indica le ore giornaliere nella scheda del dipendente.', values: p, fields: [{ k: 'oreGiorno', l: 'Ore di lavoro al giorno da contratto', t: 'number', req: true, half: true }, { k: 'tragitto', l: 'Tragitto contato al (%)', t: 'number', req: true, half: true }, { k: 'festivi', l: 'Altre festività (es. patrono)', t: 'textarea', hint: 'Date in formato MM-GG (ogni anno, es. 05-02) o AAAA-MM-GG, separate da virgola. Le festività nazionali e la Pasquetta sono già incluse.' }], onSave: async (v) => { const o = num(v.oreGiorno), t = num(v.tragitto); if (o <= 0 || o > 24) throw { vmsg: 'Le ore al giorno devono essere tra 1 e 24.' }; if (t < 0 || t > 100) throw { vmsg: 'La percentuale deve essere tra 0 e 100.' }; await put('impostazioni', 'ore', Object.assign({}, G('impostazioni', 'ore') || {}, { oreGiorno: o, tragitto: t, festivi: v.festivi })); } }); };
+A.oreParam = () => { const p = OREPAR(); openForm({ title: 'Parametri del calcolo ore', info: 'Valgono per tutti i dipendenti. Per un part-time indica le ore giornaliere nella scheda del dipendente.', values: p, fields: [{ k: 'oreGiorno', l: 'Ore di lavoro al giorno da contratto', t: 'number', req: true, half: true }, { k: 'tragitto', l: 'Tragitto contato al (%)', t: 'number', req: true, half: true }, { k: 'tolleranza', l: 'Controllo incrociato: differenza tollerata (minuti)', t: 'number', hint: 'Se due colleghi sulla stessa commessa nello stesso giorno hanno ore diverse oltre questa soglia, compare un avviso da verificare. 0 = qualsiasi differenza.' }, { k: 'festivi', l: 'Altre festività (es. patrono)', t: 'textarea', hint: 'Date in formato MM-GG (ogni anno, es. 05-02) o AAAA-MM-GG, separate da virgola. Le festività nazionali e la Pasquetta sono già incluse.' }], onSave: async (v) => { const o = num(v.oreGiorno), t = num(v.tragitto); if (o <= 0 || o > 24) throw { vmsg: 'Le ore al giorno devono essere tra 1 e 24.' }; if (t < 0 || t > 100) throw { vmsg: 'La percentuale deve essere tra 0 e 100.' }; const tl = Math.max(0, Math.round(num(v.tolleranza) || 0)); await put('impostazioni', 'ore', Object.assign({}, G('impostazioni', 'ore') || {}, { oreGiorno: o, tragitto: t, festivi: v.festivi, tolleranza: tl })); } }); };
 A.oreSoglia = () => openForm({ title: 'Soglia giornaliera', values: { soglia: sogliaMin() / 60 }, fields: [{ k: 'soglia', l: 'Ore al giorno oltre le quali si contano le ore in più', t: 'number', req: true }], onSave: async (v) => { const s = num(v.soglia); if (s <= 0 || s > 24) throw { vmsg: 'Indica un valore tra 1 e 24.' }; await put('impostazioni', 'ore', Object.assign({}, G('impostazioni', 'ore') || {}, { soglia: s })); } });
 
 async function approva(u, m) { const righe = righeOf(u, m); await patch('accessi', u, { approvati: { [m]: { min: minTot(righe), il: today(), da: S.me || 'Amministrazione' } } }); }
