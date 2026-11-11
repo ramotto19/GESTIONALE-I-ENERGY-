@@ -3616,16 +3616,35 @@ function vFatture() {
   if (S.tab === 'A' || S.tab === 'P') { S.ftab = S.tab; S.tab = null; }
   const dir = S.ftab === 'A' ? 'A' : 'P', fil = S.ffil || 'tutte', q = String(S.q || '').toLowerCase();
   const tutte = D('fatture').filter((f) => f.dir === dir), aperte = tutte.filter((f) => !f.pagata), scad = aperte.filter((f) => f.scadenza && f.scadenza < today());
-  const senza = tutte.filter((f) => !f.commessaId && !f.generale), mese = today().slice(0, 7);
+  const senza = tutte.filter((f) => !f.commessaId && !f.generale);
   const filtri = { tutte: tutte, aperte: aperte, scadute: scad, senza: senza };
   const rows = (filtri[fil] || tutte).filter((f) => !q || ((f.controparte || '') + ' ' + (f.numero || '') + ' ' + (f.descrizione || '')).toLowerCase().includes(q)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
   const chip = (k, t, n) => '<button class="btn sm' + (fil === k ? ' p' : '') + '" data-a="ffil" data-f="' + k + '">' + t + ' (' + n + ')</button>';
-  const t = tbl([{ h: 'Data', f: (f) => esc(fmtD(f.data)) }, { h: 'N.', f: (f) => esc(f.numero) }, { h: dir === 'P' ? 'Fornitore' : 'Cliente', f: (f) => '<b>' + esc(f.controparte) + '</b>' + (f.tipoDoc === 'TD04' ? ' ' + bd('Nota di credito', 'grey') : '') + (f.descrizione ? '<div class="small muted">' + esc(String(f.descrizione).slice(0, 80)) + '</div>' : '') }, { h: 'Imponibile', r: true, f: (f) => eur2(f.imponibile) }, { h: 'IVA', r: true, f: (f) => eur2(f.iva) }, { h: 'Totale', r: true, f: (f) => '<b>' + eur2(f.tot) + '</b>' }, { h: 'Scadenza', f: (f) => esc(fmtD(f.scadenza)) }, { h: 'Commessa', f: (f) => { const c = f.commessaId && G('commesse', f.commessaId); return c ? esc(commessaLabel(c)) : f.generale ? bd('Spesa generale', 'grey') : bd('Da collegare', 'amber'); } }, { h: 'Stato', f: fatStato }, { h: 'File', f: (f) => fileLink(f.file) }], rows, { empty: dir === 'P' ? 'Nessuna fattura passiva. Importa gli XML dei fornitori con «Importa XML o ZIP».' : 'Nessuna fattura attiva. Importa gli XML emessi con «Importa XML o ZIP».', row: (f) => 'data-a="fatEdit" data-id="' + esc(f.id) + '"' });
+  /* riepilogo in alto: stato di pagamento di tutte le fatture, attive e passive */
+  const allF = D('fatture'), sPD = (d, pag) => sum(allF.filter((f) => f.dir === d && !!f.pagata === pag), (f) => f.tot), nPD = (d, pag) => allF.filter((f) => f.dir === d && !!f.pagata === pag).length;
+  const nfP = (n) => n + (n === 1 ? ' fattura passiva' : ' fatture passive'), nfA = (n) => n + (n === 1 ? ' fattura attiva' : ' fatture attive');
+  const rip = '<div class="grid g4" style="margin-bottom:16px">' + kpi('Da pagare', eur2(sPD('P', false)), nfP(nPD('P', false))) + kpi('Pagate', eur2(sPD('P', true)), nfP(nPD('P', true))) + kpi('Da incassare', eur2(sPD('A', false)), nfA(nPD('A', false))) + kpi('Incassate', eur2(sPD('A', true)), nfA(nPD('A', true))) + '</div>';
   const tabs = '<div class="tabs" role="tablist">' + [['P', 'Passive (fornitori)'], ['A', 'Attive (clienti)']].map((x) => '<button class="tab' + (dir === x[0] ? ' on' : '') + '" data-a="ftab" data-t="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
-  return pageHead('Fatture', 'Fatture elettroniche passive e attive. Le passive collegate a una commessa entrano nei suoi costi; le scadenze compaiono nel calendario.', '<button class="btn" data-a="fatNew">+ Fattura manuale</button><button class="btn p" data-a="fatImport">Importa XML o ZIP</button>') + tabs +
-    '<div class="grid g4" style="margin-bottom:14px">' + kpi(dir === 'P' ? 'Da pagare' : 'Da incassare', eur2(sum(aperte, (f) => f.tot)), aperte.length + ' fatture') + kpi('Scadute', eur2(sum(scad, (f) => f.tot)), scad.length + ' fatture') + kpi('Questo mese', eur2(sum(tutte.filter((f) => String(f.data).slice(0, 7) === mese), (f) => f.tot)), 'Totale fatturato nel mese') + kpi('Da collegare', String(senza.length), 'Senza commessa né «spesa generale»') + '</div>' +
-    '<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px">' + chip('tutte', 'Tutte', tutte.length) + chip('aperte', dir === 'P' ? 'Da pagare' : 'Da incassare', aperte.length) + chip('scadute', 'Scadute', scad.length) + chip('senza', 'Da collegare', senza.length) + '<input id="q" data-in="q" placeholder="Cerca fattura" aria-label="Cerca" value="' + esc(S.q) + '" style="margin-left:auto;max-width:240px"></div>' +
-    '<section class="card">' + t + '</section><p class="small muted" style="margin-top:10px">Importazione automatica dal software di fatturazione (DocEasy): in preparazione. Intanto puoi caricare a mano gli XML (anche firmati .p7m o in uno ZIP): ogni fattura già presente non viene duplicata.</p>';
+  return pageHead('Fatture', 'Fatture elettroniche passive e attive, divise per mese. Le passive collegate a una commessa entrano nei suoi costi; le scadenze compaiono nel calendario.', '<button class="btn" data-a="fatNew">+ Fattura manuale</button><button class="btn p" data-a="fatImport">Importa XML o ZIP</button>') + rip + tabs +
+    '<div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0 10px">' + chip('tutte', 'Tutte', tutte.length) + chip('aperte', dir === 'P' ? 'Da pagare' : 'Da incassare', aperte.length) + chip('scadute', 'Scadute', scad.length) + chip('senza', 'Da collegare', senza.length) + '<input id="q" data-in="q" placeholder="Cerca fattura" aria-label="Cerca" value="' + esc(S.q) + '" style="margin-left:auto;max-width:240px"></div>' +
+    '<section class="card">' + fattMese(rows, dir) + '</section><p class="small muted" style="margin-top:10px">Importazione automatica dal software di fatturazione (DocEasy): in preparazione. Intanto puoi caricare a mano gli XML (anche firmati .p7m o in uno ZIP): ogni fattura già presente non viene duplicata.</p>';
+}
+/* elenco fatture diviso per mese (intestazione del mese + totale del mese) */
+function fattMese(rows, dir) {
+  if (!rows.length) return '<div class="empty">' + (dir === 'P' ? 'Nessuna fattura passiva. Importa gli XML dei fornitori con «Importa XML o ZIP».' : 'Nessuna fattura attiva. Importa gli XML emessi con «Importa XML o ZIP».') + '</div>';
+  const byM = {};
+  rows.forEach((f) => { const m = String(f.data || '').slice(0, 7) || '—'; (byM[m] = byM[m] || []).push(f); });
+  const mesi = Object.keys(byM).sort((a, b) => b.localeCompare(a));
+  const head = '<thead><tr><th>Data</th><th>N.</th><th>' + (dir === 'P' ? 'Fornitore' : 'Cliente') + '</th><th class="r">Imponibile</th><th class="r">IVA</th><th class="r">Totale</th><th>Scadenza</th><th>Commessa</th><th>Stato</th><th>File</th></tr></thead>';
+  const comm = (f) => { const c = f.commessaId && G('commesse', f.commessaId); return c ? esc(commessaLabel(c)) : f.generale ? bd('Spesa generale', 'grey') : bd('Da collegare', 'amber'); };
+  const rowH = (f) => '<tr class="clk" data-a="fatEdit" data-id="' + esc(f.id) + '"><td>' + esc(fmtD(f.data)) + '</td><td>' + esc(f.numero) + '</td><td><b>' + esc(f.controparte) + '</b>' + (f.tipoDoc === 'TD04' ? ' ' + bd('Nota di credito', 'grey') : '') + (f.descrizione ? '<div class="small muted">' + esc(String(f.descrizione).slice(0, 80)) + '</div>' : '') + '</td><td class="r">' + eur2(f.imponibile) + '</td><td class="r">' + eur2(f.iva) + '</td><td class="r"><b>' + eur2(f.tot) + '</b></td><td>' + esc(fmtD(f.scadenza)) + '</td><td>' + comm(f) + '</td><td>' + fatStato(f) + '</td><td>' + fileLink(f.file) + '</td></tr>';
+  const body = mesi.map((m) => {
+    const list = byM[m].sort((a, b) => String(b.data).localeCompare(String(a.data))), tot = sum(list, (f) => f.tot);
+    const lab = m === '—' ? 'Senza data' : (meseLabel(m).charAt(0).toUpperCase() + meseLabel(m).slice(1));
+    const hd = '<tr><td colspan="3" style="background:#efece4;font-weight:700">' + esc(lab) + ' · ' + list.length + (list.length === 1 ? ' fattura' : ' fatture') + '</td><td colspan="2" style="background:#efece4"></td><td class="r" style="background:#efece4;font-weight:700">' + eur2(tot) + '</td><td colspan="4" style="background:#efece4"></td></tr>';
+    return hd + list.map(rowH).join('');
+  }).join('');
+  return '<div class="scroll"><table class="tbl">' + head + '<tbody>' + body + '</tbody></table></div>';
 }
 
 /* ---------- avvio ---------- */
