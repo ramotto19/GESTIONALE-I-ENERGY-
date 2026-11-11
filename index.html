@@ -2102,7 +2102,7 @@ function vOre() {
   const rs = righeAcc(m).map((r) => Object.assign(r, { om: oreMese(r.righe, m, dipDiAcc(r.a.id)) })), tot = rs.reduce((t, r) => ({ L: t.L + r.om.lavoro, T: t.T + r.om.tr, A: t.A + r.om.assenze, O: t.O + r.om.ord, S: t.S + r.om.str }), { L: 0, T: 0, A: 0, O: 0, S: 0 });
   const par = OREPAR(), gl = giorniLavMese(m).length;
   const senza = D('dipendenti').filter((d) => d.attivo !== false && !D('accessi').some((a) => a.dipendenteId === d.id));
-  const act = '<button class="btn" data-a="oreCsv" data-k="riep">Riepilogo per paghe (CSV)</button><button class="btn" data-a="oreCsv" data-k="det">Rapportini dettagliati (CSV)</button>';
+  const act = '<button class="btn p" data-a="oreXls">Riepilogo Excel</button><button class="btn" data-a="orePrint">Stampa / PDF</button><button class="btn" data-a="oreCsv" data-k="riep">Riepilogo CSV</button><button class="btn" data-a="oreCsv" data-k="det">Rapportini dettagliati (CSV)</button>';
   let h = pageHead('Ore del personale', 'Totali del mese per persona, pronti per paghe e amministrazione. Tocca una riga per aprire il registro di quella persona.', act) + tabs + '<div class="row sp" style="margin-bottom:14px">' + meseNav('omese') + '<span class="row"><button class="btn" data-a="oreRefresh">' + (S.oreLoading ? 'Aggiorno…' : 'Aggiorna') + '</button><button class="btn" data-a="oreApprAll">Approva tutti</button></span></div>';
   h += '<div class="alert green" style="margin-bottom:12px"><b>' + esc(meseLabel(m)) + ':</b> ' + gl + ' giorni lavorativi × ' + decOre(par.oreGiorno * 60) + ' ore = <b>' + fmtMin(Math.round(gl * par.oreGiorno * 60)) + '</b> ore dovute (festivi esclusi). Il sabato lavorato è tutto straordinario. Tragitto al ' + par.tragitto + '%. Le ore oltre il dovuto e tutto il sabato lavorato sono straordinari (qui vengono solo conteggiati).</div>';
   h += '<section class="card">' + (rs.length ? '<div class="scroll"><table class="tbl"><thead><tr><th>Persona</th><th class="r">Giorni</th><th class="r">Ore lavorate</th><th class="r">Tragitto (' + par.tragitto + '%)</th><th class="r">Assenze</th><th class="r">Ordinarie</th><th class="r">Straordinari</th><th>Interventi EOLO</th><th>Stato</th><th></th></tr></thead><tbody>' +
@@ -2231,14 +2231,41 @@ A.accDel = async (d) => { if (!(await confirmBox(byEmail() ? 'Togliere l\u2019ac
 /* ---------- esportazione CSV per paghe e amministrazione ---------- */
 const csvCell = (x) => { const s = String(x == null ? '' : x); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 const toCsv = (rows) => '\uFEFF' + rows.map((r) => r.map(csvCell).join(';')).join('\r\n');
+/* riepilogo mensile del personale: stesse righe per CSV, Excel e stampa/PDF (ore in decimali con la virgola, come servono alle paghe) */
+function riepilogoRows(m, rs) {
+  const head = ['Persona', 'Mese', 'Giorni lavorati', 'Ore dovute del mese', 'Ore lavorate', 'Tragitto effettivo (ore)', 'Tragitto computato (ore)', 'Ferie (ore)', 'Permessi (ore)', 'Malattia (ore)', 'Altre assenze (ore)', 'Ore ordinarie', 'Ore straordinarie', 'di cui sabato (ore)', 'Ore mancanti', 'EOLO manutenzioni', 'EOLO attivazioni', 'EOLO guasti', 'EOLO KO', 'Stato'];
+  const T = { g: 0, dov: 0, lav: 0, trr: 0, trc: 0, F: 0, P: 0, M: 0, A: 0, ord: 0, str: 0, sab: 0, manc: 0 };
+  const rows = rs.map((r) => {
+    const o = oreMese(r.righe, m, dipDiAcc(r.a.id)), manc = m < meseOggi() ? o.manc : 0;
+    T.g += o.giorni; T.dov += o.dovute; T.lav += o.lavoro; T.trr += o.trRaw; T.trc += o.tr; T.F += r.x.t.F; T.P += r.x.t.P; T.M += r.x.t.M; T.A += r.x.t.A; T.ord += o.ord; T.str += o.str; T.sab += o.sab; T.manc += manc;
+    return [r.nome, m, o.giorni, decOre(o.dovute), decOre(o.lavoro), decOre(o.trRaw), decOre(o.tr), decOre(r.x.t.F), decOre(r.x.t.P), decOre(r.x.t.M), decOre(r.x.t.A), decOre(o.ord), decOre(o.str), decOre(o.sab), decOre(manc), r.eo.M, r.eo.A, r.eo.G, r.eo.K, r.st.t];
+  });
+  const tot = ['TOTALE', m, T.g, decOre(T.dov), decOre(T.lav), decOre(T.trr), decOre(T.trc), decOre(T.F), decOre(T.P), decOre(T.M), decOre(T.A), decOre(T.ord), decOre(T.str), decOre(T.sab), decOre(T.manc), '', '', '', '', ''];
+  return [head].concat(rows, [tot]);
+}
+const tabellaHtml = (rows, titolo) => '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + rows.map((r, i) => '<tr' + (i === 0 || i === rows.length - 1 ? ' style="font-weight:bold;background:#eeeeee"' : '') + '>' + r.map((c) => '<' + (i === 0 ? 'th' : 'td') + '>' + esc(c) + '</' + (i === 0 ? 'th' : 'td') + '>').join('') + '</tr>').join('') + '</table>';
+A.oreXls = async () => {
+  const m = S.mese || meseOggi(); await loadAllOre(m, true);
+  const rows = riepilogoRows(m, righeAcc(m));
+  const html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>' + tabellaHtml(rows, 'Riepilogo ore del personale · ' + meseLabel(m)) + '</body></html>';
+  const blob = new Blob(['﻿' + html], { type: 'application/vnd.ms-excel;charset=utf-8' }), url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'ore-' + m + '-riepilogo.xls'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 4000);
+};
+A.orePrint = async () => {
+  const m = S.mese || meseOggi(); await loadAllOre(m, true);
+  const rows = riepilogoRows(m, righeAcc(m)), par = OREPAR();
+  const nota = '<p style="font-family:Arial;font-size:11px">Ore dovute = giorni lavorativi del mese × ' + decOre(par.oreGiorno * 60) + ' ore. Tragitto computato al ' + par.tragitto + '%. Il sabato lavorato è tutto straordinario.</p>';
+  const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'; document.body.appendChild(f);
+  f.srcdoc = '<html><head><meta charset="utf-8"><style>@page{size:A4 landscape;margin:10mm}</style></head><body>' + tabellaHtml(rows, 'Riepilogo ore del personale · ' + meseLabel(m)) + nota + '</body></html>';
+  f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast('Stampa non riuscita.', 'err'); } setTimeout(() => f.remove(), 60000); };
+};
 A.oreCsv = async (d) => {
   if (!dl) { toast('L\u2019esportazione non è disponibile in questa vista.', 'err'); return; }
   const m = S.mese || meseOggi(); await loadAllOre(m, true);
   const rs = righeAcc(m); let rows, nome;
   if (d.k === 'riep') {
     nome = 'ore-' + m + '-riepilogo.csv';
-    rows = [['Persona', 'Mese', 'Giorni lavorati', 'Ore lavorate (decimali)', 'Ore lavorate (hh:mm)', 'Ferie (ore)', 'Permessi (ore)', 'Malattia (ore)', 'Altre assenze (ore)', 'Ore dovute del mese', 'Tragitto effettivo (ore)', 'Tragitto computato (ore)', 'Ore ordinarie', 'Ore straordinarie', 'di cui sabato (ore)', 'EOLO manutenzioni', 'EOLO attivazioni', 'EOLO guasti', 'EOLO KO', 'Stato']]
-      .concat(rs.map((r) => [r.nome, m, r.x.giorni, decOre(r.x.t.L), fmtMin(r.x.t.L), decOre(r.x.t.F), decOre(r.x.t.P), decOre(r.x.t.M), decOre(r.x.t.A)].concat(oreCsvCalc(r, m), [r.eo.M, r.eo.A, r.eo.G, r.eo.K, r.st.t])));
+    rows = riepilogoRows(m, rs);
   } else {
     nome = 'ore-' + m + '-rapportini.csv';
     rows = [['Persona', 'Data', 'Tipo', 'Ingresso', 'Uscita', 'Pausa (min)', 'Tragitto (min)', 'Ore nette (decimali)', 'Ore nette (hh:mm)', 'Commessa o luogo', 'Attività', 'EOLO manutenzioni', 'EOLO attivazioni', 'EOLO guasti', 'EOLO KO']];
