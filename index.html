@@ -2273,14 +2273,9 @@ const csvCell = (x) => { const s = String(x == null ? '' : x); return /[;"\n\r]/
 const toCsv = (rows) => '\uFEFF' + rows.map((r) => r.map(csvCell).join(';')).join('\r\n');
 /* riepilogo mensile del personale: stesse righe per CSV, Excel e stampa/PDF (ore in formato hh:mm, con la somma totale in fondo) */
 function riepilogoRows(m, rs) {
-  const head = ['Persona', 'Mese', 'Giorni lavorati', 'Ore dovute del mese (hh:mm)', 'Ore lavorate (hh:mm)', 'Tragitto (hh:mm)', 'Ferie (hh:mm)', 'Permessi (hh:mm)', 'Malattia (hh:mm)', 'Altre assenze (hh:mm)', 'Ore ordinarie (hh:mm)', 'Ore straordinarie (hh:mm)', 'Ore mancanti (hh:mm)', 'EOLO manutenzioni', 'EOLO attivazioni', 'EOLO guasti', 'EOLO KO', 'Stato'];
-  const T = { g: 0, dov: 0, lav: 0, trr: 0, trc: 0, F: 0, P: 0, M: 0, A: 0, ord: 0, str: 0, sab: 0, manc: 0 };
-  const rows = rs.map((r) => {
-    const o = oreMese(r.righe, m, dipDiAcc(r.a.id)), manc = m < meseOggi() ? o.manc : 0;
-    T.g += o.giorni; T.dov += o.dovute; T.lav += o.lavoro; T.trr += o.trRaw; T.trc += o.tr; T.F += r.x.t.F; T.P += r.x.t.P; T.M += r.x.t.M; T.A += r.x.t.A; T.ord += o.ord; T.str += o.str; T.sab += o.sab; T.manc += manc;
-    return [r.nome, m, o.giorni, fmtMin(o.dovute), fmtMin(o.lavoro), fmtMin(o.tr), fmtMin(r.x.t.F), fmtMin(r.x.t.P), fmtMin(r.x.t.M), fmtMin(r.x.t.A), fmtMin(o.ord), fmtMin(o.str), fmtMin(manc), r.eo.M, r.eo.A, r.eo.G, r.eo.K, r.st.t];
-  });
-  return [head].concat(rows);
+  /* stesse colonne della tabella "Riepilogo mensile" a schermo */
+  const head = ['Persona', 'Giorni', 'Ore lavorate', 'Tragitto', 'Assenze', 'Ordinarie', 'Straordinari', 'Interventi EOLO', 'Stato'];
+  return [head].concat(rs.map((r) => { const o = oreMese(r.righe, m, dipDiAcc(r.a.id)); return [r.nome, o.giorni, fmtMin(o.lavoro), fmtMin(o.tr), fmtMin(o.assenze), fmtMin(o.ord), fmtMin(o.str), r.eo.tot ? eoloTxt(r.eo) : '', r.st.t]; }));
 }
 const tabellaHtml = (rows, titolo, bl) => '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + rows.map((r, i) => '<tr' + (i === 0 || (bl && i === rows.length - 1) ? ' style="font-weight:bold;background:#eeeeee"' : '') + '>' + r.map((c) => '<' + (i === 0 ? 'th' : 'td style="mso-number-format:\'\\@\'"') + '>' + esc(c) + '</' + (i === 0 ? 'th' : 'td') + '>').join('') + '</tr>').join('') + '</table>';
 
@@ -2288,7 +2283,7 @@ const tabellaHtml = (rows, titolo, bl) => '<h2 style="font-family:Arial">' + esc
 function persObj(u, m) { const a = G('accessi', u) || { id: u }, righe = righeOf(u, m); return { a: a, nome: nomeAcc(a), righe: righe, x: oreTot(righe), eo: eoloTot(righe), st: stBase(u, m, righe) }; }
 function dettPersona(p, m) {
   const o = oreMese(p.righe, m, dipDiAcc(p.a.id)), par = OREPAR(), manc = m < meseOggi() ? o.manc : 0;
-  const sum = [['Ore dovute del mese', 'Ore lavorate', 'Tragitto', 'Ferie', 'Permessi', 'Malattia', 'Altre assenze', 'Ore ordinarie', 'Ore straordinarie', 'Ore mancanti'], [fmtMin(o.dovute), fmtMin(o.lavoro), fmtMin(o.tr), fmtMin(p.x.t.F), fmtMin(p.x.t.P), fmtMin(p.x.t.M), fmtMin(p.x.t.A), fmtMin(o.ord), fmtMin(o.str), fmtMin(manc)]];
+  const sum = [['Ore dovute', 'Giorni', 'Ore lavorate', 'Tragitto', 'Assenze', 'Ordinarie', 'Straordinari'], [fmtMin(o.dovute), o.giorni, fmtMin(o.lavoro), fmtMin(o.tr), fmtMin(o.assenze), fmtMin(o.ord), fmtMin(o.str)]];
   const day = [['Data', 'Giorno', 'Tipo', 'Ingresso', 'Uscita', 'Pausa (min)', 'Ore lavorate (hh:mm)', 'Tragitto (hh:mm)', 'Assenza (hh:mm)', 'Commessa o luogo', 'Attività']];
   ordina(p.righe).forEach((x) => { const L = tipoR(x) === 'L', tr = L ? (Number(x.tr) || 0) : 0; day.push([fmtD(x.d), GG[parseD(x.d).getDay()], lab(TIPI_ORE, tipoR(x)), L ? (x.i || '') : '', L ? (x.u || '') : '', L ? (Number(x.p) || 0) : '', L ? fmtMin(minRiga(x)) : '', L ? fmtMin(tr) : '', L ? '' : fmtMin(minRiga(x)), x.c || '', x.a || '']); });
   day.push(['TOTALE ' + p.nome, '', '', '', '', '', fmtMin(o.lavoro), fmtMin(o.tr), fmtMin(o.assenze), '', '']);
