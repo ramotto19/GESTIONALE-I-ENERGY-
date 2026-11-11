@@ -2231,19 +2231,19 @@ A.accDel = async (d) => { if (!(await confirmBox(byEmail() ? 'Togliere l\u2019ac
 /* ---------- esportazione CSV per paghe e amministrazione ---------- */
 const csvCell = (x) => { const s = String(x == null ? '' : x); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 const toCsv = (rows) => '\uFEFF' + rows.map((r) => r.map(csvCell).join(';')).join('\r\n');
-/* riepilogo mensile del personale: stesse righe per CSV, Excel e stampa/PDF (ore in decimali con la virgola, come servono alle paghe) */
+/* riepilogo mensile del personale: stesse righe per CSV, Excel e stampa/PDF (ore in formato hh:mm, con la somma totale in fondo) */
 function riepilogoRows(m, rs) {
-  const head = ['Persona', 'Mese', 'Giorni lavorati', 'Ore dovute del mese', 'Ore lavorate', 'Tragitto effettivo (ore)', 'Tragitto computato (ore)', 'Ferie (ore)', 'Permessi (ore)', 'Malattia (ore)', 'Altre assenze (ore)', 'Ore ordinarie', 'Ore straordinarie', 'di cui sabato (ore)', 'Ore mancanti', 'EOLO manutenzioni', 'EOLO attivazioni', 'EOLO guasti', 'EOLO KO', 'Stato'];
+  const head = ['Persona', 'Mese', 'Giorni lavorati', 'Ore dovute del mese (hh:mm)', 'Ore lavorate (hh:mm)', 'Tragitto effettivo (hh:mm)', 'Tragitto computato (hh:mm)', 'Ferie (hh:mm)', 'Permessi (hh:mm)', 'Malattia (hh:mm)', 'Altre assenze (hh:mm)', 'Ore ordinarie (hh:mm)', 'Ore straordinarie (hh:mm)', 'di cui sabato (hh:mm)', 'Ore mancanti (hh:mm)', 'EOLO manutenzioni', 'EOLO attivazioni', 'EOLO guasti', 'EOLO KO', 'Stato'];
   const T = { g: 0, dov: 0, lav: 0, trr: 0, trc: 0, F: 0, P: 0, M: 0, A: 0, ord: 0, str: 0, sab: 0, manc: 0 };
   const rows = rs.map((r) => {
     const o = oreMese(r.righe, m, dipDiAcc(r.a.id)), manc = m < meseOggi() ? o.manc : 0;
     T.g += o.giorni; T.dov += o.dovute; T.lav += o.lavoro; T.trr += o.trRaw; T.trc += o.tr; T.F += r.x.t.F; T.P += r.x.t.P; T.M += r.x.t.M; T.A += r.x.t.A; T.ord += o.ord; T.str += o.str; T.sab += o.sab; T.manc += manc;
-    return [r.nome, m, o.giorni, decOre(o.dovute), decOre(o.lavoro), decOre(o.trRaw), decOre(o.tr), decOre(r.x.t.F), decOre(r.x.t.P), decOre(r.x.t.M), decOre(r.x.t.A), decOre(o.ord), decOre(o.str), decOre(o.sab), decOre(manc), r.eo.M, r.eo.A, r.eo.G, r.eo.K, r.st.t];
+    return [r.nome, m, o.giorni, fmtMin(o.dovute), fmtMin(o.lavoro), fmtMin(o.trRaw), fmtMin(o.tr), fmtMin(r.x.t.F), fmtMin(r.x.t.P), fmtMin(r.x.t.M), fmtMin(r.x.t.A), fmtMin(o.ord), fmtMin(o.str), fmtMin(o.sab), fmtMin(manc), r.eo.M, r.eo.A, r.eo.G, r.eo.K, r.st.t];
   });
-  const tot = ['TOTALE', m, T.g, decOre(T.dov), decOre(T.lav), decOre(T.trr), decOre(T.trc), decOre(T.F), decOre(T.P), decOre(T.M), decOre(T.A), decOre(T.ord), decOre(T.str), decOre(T.sab), decOre(T.manc), '', '', '', '', ''];
+  const tot = ['TOTALE', m, T.g, fmtMin(T.dov), fmtMin(T.lav), fmtMin(T.trr), fmtMin(T.trc), fmtMin(T.F), fmtMin(T.P), fmtMin(T.M), fmtMin(T.A), fmtMin(T.ord), fmtMin(T.str), fmtMin(T.sab), fmtMin(T.manc), '', '', '', '', ''];
   return [head].concat(rows, [tot]);
 }
-const tabellaHtml = (rows, titolo) => '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + rows.map((r, i) => '<tr' + (i === 0 || i === rows.length - 1 ? ' style="font-weight:bold;background:#eeeeee"' : '') + '>' + r.map((c) => '<' + (i === 0 ? 'th' : 'td') + '>' + esc(c) + '</' + (i === 0 ? 'th' : 'td') + '>').join('') + '</tr>').join('') + '</table>';
+const tabellaHtml = (rows, titolo) => '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + rows.map((r, i) => '<tr' + (i === 0 || i === rows.length - 1 ? ' style="font-weight:bold;background:#eeeeee"' : '') + '>' + r.map((c) => '<' + (i === 0 ? 'th' : 'td style="mso-number-format:\'\\@\'"') + '>' + esc(c) + '</' + (i === 0 ? 'th' : 'td') + '>').join('') + '</tr>').join('') + '</table>';
 A.oreXls = async () => {
   const m = S.mese || meseOggi(); await loadAllOre(m, true);
   const rows = riepilogoRows(m, righeAcc(m));
