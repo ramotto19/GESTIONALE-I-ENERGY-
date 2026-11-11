@@ -1722,7 +1722,9 @@ function vDocumentale() {
   const t = tbl([{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo) + '</b>' + (x.commessaId && G('commesse', x.commessaId) ? '<div class="small muted">Commessa ' + esc(G('commesse', x.commessaId).codice) + '</div>' : '') }, { h: 'Categoria', f: (x) => esc(catPath(x.categoriaId)) }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Scadenza', f: (x) => x.scadenza ? (x.archiviato ? bd(fmtD(x.scadenza), 'red') : scadBadge(x.scadenza)) : '<span class="muted">—</span>' }, { h: 'Accesso', f: (x) => stBadge(ACCESSI, x.accesso || 'RESPONSABILI') }, { h: 'File', f: (x) => fileLink(x.file) }], rows, { empty: S.dcat === '__scaduti' ? 'Nessun documento scaduto: quelli con scadenza passata finiscono qui e nella cartella Scaduti su Drive.' : 'Nessun documento in questa categoria.', row: (x) => 'data-a="docEdit" data-id="' + esc(x.id) + '" data-col="' + colDoc(x) + '"' });
   const verb = D('verbali').concat(S.admin ? D('riservato').filter((x) => x.kind === 'verbale') : []).sort((a, b) => String(b.data).localeCompare(String(a.data)));
   const vt = tbl([{ h: 'Data', f: (v) => esc(fmtD(v.data)) }, { h: 'Verbale', f: (v) => '<b>' + esc(v.oggetto) + '</b><div class="small muted">' + esc(lab(TIPI_VERBALE, v.tipo)) + '</div>' }, { h: 'Azioni', f: (v) => { const ap = (v.azioni || []).filter((a) => a.stato !== 'CHIUSA').length; return (v.azioni || []).length ? bd(ap + ' aperte / ' + v.azioni.length, ap ? 'amber' : 'green') : '<span class="muted">—</span>'; } }, { h: 'Riservato', f: (v) => (G('riservato', v.id) ? bd('Riservato', 'dark') : '') }, { h: 'File', f: (v) => fileLink(v.file) }], verb, { empty: 'Nessun verbale. Registra riunioni periodiche, verbali di sostenibilità e di rapporto con i dipendenti.', row: (v) => 'data-a="verbOpen" data-id="' + esc(v.id) + '" data-col="' + (G('riservato', v.id) ? 'riservato' : 'verbali') + '"' });
-  return pageHead('Documentale', 'Sicurezza, mezzi, certificazioni, sostenibilità e verbali, divisi per categoria.', '<button class="btn" data-a="verbNew">Nuovo verbale</button><button class="btn p" data-a="docNew">Carica documento</button>') +
+  const daRiord = S.admin ? catAzioni().length : 0;
+  const banner = daRiord ? '<div class="alert amber" style="margin-bottom:12px"><b>Categorie da riordinare.</b> Ci sono ' + daRiord + ' categorie vecchie da unire nella nuova struttura (02 Amministrazione, 03 Contratti, 04 Qualità e sicurezza). I documenti vengono spostati, i file su Drive restano dove sono. <button class="btn sm p" data-a="catMigra" style="margin-left:8px">Riordina ora</button></div>' : '';
+  return pageHead('Documentale', 'Documenti dell’azienda divisi per categoria: amministrazione, contratti, qualità e sicurezza.', '<button class="btn" data-a="verbNew">Nuovo verbale</button><button class="btn p" data-a="docNew">Carica documento</button>') + banner +
     '<div class="grid" style="grid-template-columns:240px minmax(0,1fr)"><div class="card"><h2>Categorie</h2>' + tree + '</div><div class="stack">' + cardScaduti((e) => e.tipo === 'DOCUMENTALE') + '<div><div class="fbar"><input id="q" data-in="q" placeholder="Cerca documento" aria-label="Cerca" value="' + esc(S.q) + '"></div><div class="card">' + t + '</div></div>' + card('Verbali', vt) + (S.admin ? '' : '<div class="small muted">I documenti riservati (ad esempio i verbali con i dipendenti) sono visibili solo agli amministratori.</div>') + '</div></div>';
 }
 A.dcat = (d) => { S.dcat = d.c; queueRender(); };
@@ -2539,26 +2541,45 @@ function edCategorie() {
   const rows = roots.map((r) => { const f = D('categorie').filter((c) => c.parentId === r.id).sort(byStr((c) => c.nome)); return row(r, 0) + f.map((c) => row(c, 1)).join('') + (f.length ? '' : '<div class="small muted" style="padding:0 0 8px 28px">Nessuna sottocategoria: i documenti si archiviano nelle sottocategorie.</div>'); }).join('');
   return card('Categorie dei documenti', '<p class="muted small" style="margin:0 0 6px">Due livelli: categoria e sottocategorie, ordinate alfabeticamente. I documenti si salvano nelle sottocategorie. Una categoria «riservata» rende riservate anche le sue sottocategorie.</p>' + (rows || '<div class="empty">Nessuna categoria.</div>'), '<button class="btn sm" data-a="catMigra">Riordina nella nuova struttura</button><button class="btn p sm" data-a="catNew" data-p="">+ Categoria</button>');
 }
-/* riordino delle categorie esistenti secondo la nuova struttura (02 Amministrazione, 03 Contratti, 04 Qualità e sicurezza):
-   sposta i documenti nelle nuove sottocategorie e toglie quelle vecchie rimaste vuote. Chiede conferma mostrando cosa cambia. */
-const MIGRA_CAT = [
-  ['Sicurezza', '*', '04 Sistema qualità e sicurezza', 'DVR, procedure e nomine sicurezza'],
-  ['Certificazioni', '*', '04 Sistema qualità e sicurezza', 'Certificazioni ISO e audit'],
-  ['Sostenibilita', '*', '04 Sistema qualità e sicurezza', 'Sostenibilità e rifiuti'],
-  ['Amministrazione e contabilita', 'Contratti e corrispondenza', '03 Contratti', 'Altri contratti'],
-  ['Amministrazione e contabilita', 'Fatture e documenti contabili', '02 Amministrazione e contabilità', 'Fatture generali'],
-  ['Amministrazione e contabilita', 'Adempimenti fiscali e tributari', '02 Amministrazione e contabilità', 'Bilanci e dichiarazioni'],
-  ['Amministrazione e contabilita', 'Prima nota', '02 Amministrazione e contabilità', 'Prima nota e contabilità'],
-  ['Bilancio', '*', '02 Amministrazione e contabilità', 'Bilanci e dichiarazioni'],
-  ['Rapporti Banche', '*', '02 Amministrazione e contabilità', 'Banche e finanziamenti']
-];
-const nrm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-function catPiano() {
+const nrm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+/* riordino delle categorie del Documentale verso la struttura numerata (02/03/04 + Altri documenti).
+   Tre livelli di regole: SUB_MAP (sottocategoria precisa → categoria nuova), ROOT_COLLAPSE (tutte le
+   sottocategorie di una vecchia categoria finiscono in una sola), ROOT_MAP (le sottocategorie seguono
+   la vecchia categoria nella nuova, mantenendo il proprio nome). Una categoria che l'amministratore ha
+   creato e che non rientra in nessuna regola NON viene toccata. Le vecchie sottocategorie senza
+   documenti vengono semplicemente eliminate; quelle con documenti vengono spostate. I file su Drive
+   restano dove sono. */
+const CAT_02 = '02 Amministrazione e contabilità', CAT_03 = '03 Contratti', CAT_04 = '04 Sistema qualità e sicurezza', CAT_ALTRI = 'Altri documenti';
+const ROOT_MAP = { 'amministrazione e contabilita': CAT_02 };
+const ROOT_COLLAPSE = {
+  'sicurezza': [CAT_04, 'DVR, procedure e nomine sicurezza'],
+  'certificazioni': [CAT_04, 'Certificazioni ISO e audit'],
+  'sostenibilita': [CAT_04, 'Sostenibilità e rifiuti'],
+  'bilancio': [CAT_02, 'Bilanci e dichiarazioni'],
+  'rapporti banche': [CAT_02, 'Banche e finanziamenti'],
+  'ddt': [CAT_ALTRI, 'Altro']
+};
+const SUB_MAP = {
+  'amministrazione e contabilita/contratti e corrispondenza': [CAT_03, 'Altri contratti'],
+  'amministrazione e contabilita/fatture e documenti contabili': [CAT_02, 'Fatture generali'],
+  'amministrazione e contabilita/adempimenti fiscali e tributari': [CAT_02, 'Bilanci e dichiarazioni'],
+  'amministrazione e contabilita/prima nota': [CAT_02, 'Prima nota e contabilità']
+};
+const OLD_ROOTS = new Set(Object.keys(ROOT_MAP).concat(Object.keys(ROOT_COLLAPSE)));
+function catTarget(rootNome, subNome) {
+  const k = nrm(rootNome) + '/' + nrm(subNome);
+  if (SUB_MAP[k]) return SUB_MAP[k];
+  if (ROOT_COLLAPSE[nrm(rootNome)]) return ROOT_COLLAPSE[nrm(rootNome)];
+  if (ROOT_MAP[nrm(rootNome)]) return [ROOT_MAP[nrm(rootNome)], subNome];
+  return null;
+}
+function catAzioni() {
   const out = [];
   D('categorie').filter((c) => c.parentId).forEach((c) => {
     const r = G('categorie', c.parentId); if (!r) return;
-    const m = MIGRA_CAT.find((x) => nrm(x[0]) === nrm(r.nome) && (x[1] === '*' || nrm(x[1]) === nrm(c.nome)));
-    if (m && !(nrm(m[2]) === nrm(r.nome) && nrm(m[3]) === nrm(c.nome))) out.push({ c: c, r: r, to: [m[2], m[3]], n: tuttiDoc().filter((x) => x.categoriaId === c.id).length });
+    const t = catTarget(r.nome, c.nome); if (!t) return;
+    if (nrm(t[0]) === nrm(r.nome) && nrm(t[1]) === nrm(c.nome)) return;
+    out.push({ c: c, r: r, to: t, n: tuttiDoc().filter((x) => x.categoriaId === c.id).length });
   });
   return out;
 }
@@ -2569,21 +2590,28 @@ async function catEnsure(rootName, subName) {
   if (!c) { const id = 'cat-' + slug(rootName).slice(0, 8) + '-' + slug(subName); await db.doc('categorie/' + id).set({ nome: subName, parentId: r.id, ordine: 99 }); c = { id: id }; }
   return c.id;
 }
+async function eseguiRiordino(acts) {
+  /* prudente: i documenti si rileggono al momento dell'esecuzione (non dal piano), si spostano,
+     e la vecchia sottocategoria si elimina SOLO se dopo lo spostamento non ha più documenti. */
+  let nd = 0, nc = 0;
+  for (const x of acts) {
+    const docs = tuttiDoc().filter((y) => y.categoriaId === x.c.id);
+    if (docs.length) { const nid = await catEnsure(x.to[0], x.to[1]); for (const d of docs) { await patch(colDoc(d), d.id, { categoriaId: nid }); nd++; } }
+    if (!tuttiDoc().some((y) => y.categoriaId === x.c.id)) { await db.doc('categorie/' + x.c.id).delete(); nc++; }
+  }
+  for (const r of D('categorie').filter((c) => !c.parentId)) {
+    if (!OLD_ROOTS.has(nrm(r.nome))) continue;
+    if (!D('categorie').some((c) => c.parentId === r.id)) { try { await db.doc('categorie/' + r.id).delete(); } catch (e) { /* ignora */ } }
+  }
+  return { nd: nd, nc: nc };
+}
 A.catMigra = async () => {
-  const pi = catPiano();
-  if (!pi.length) { toast('Le categorie sono già nella nuova struttura: niente da riordinare.'); return; }
-  const righe = pi.map((x) => x.r.nome + ' / ' + x.c.nome + ' → ' + x.to[0] + ' / ' + x.to[1] + ' (' + x.n + ' doc.)').join(' · ');
+  const acts = catAzioni();
+  if (!acts.length) { toast('Le categorie sono già nella nuova struttura: niente da riordinare.'); return; }
+  const righe = acts.map((x) => x.r.nome + ' / ' + x.c.nome + ' → ' + x.to[0] + ' / ' + x.to[1] + (x.n ? ' (' + x.n + ' doc.)' : ' (vuota)')).join(' · ');
   if (!(await confirmBox('Riordino le categorie secondo la nuova struttura. Cambia così: ' + righe + '. I documenti vengono spostati nella nuova categoria; le vecchie categorie rimaste vuote vengono tolte. I file su Drive restano dove sono.', 'Riordina'))) return;
-  let nd = 0;
-  try {
-    for (const x of pi) {
-      const nid = await catEnsure(x.to[0], x.to[1]);
-      for (const d of tuttiDoc().filter((y) => y.categoriaId === x.c.id)) { await patch(colDoc(d), d.id, { categoriaId: nid }); nd++; }
-      await db.doc('categorie/' + x.c.id).delete();
-    }
-    for (const r of D('categorie').filter((c) => !c.parentId)) { const resta = D('categorie').some((c) => c.parentId === r.id && !pi.some((x) => x.c.id === c.id)); if (!resta && pi.some((x) => x.r.id === r.id)) await db.doc('categorie/' + r.id).delete(); }
-    toast('Categorie riordinate: ' + nd + (nd === 1 ? ' documento spostato.' : ' documenti spostati.'));
-  } catch (e) { toast('Riordino non completato: riprova.', 'err'); }
+  try { const r = await eseguiRiordino(acts); toast('Categorie riordinate: ' + r.nd + (r.nd === 1 ? ' documento spostato' : ' documenti spostati') + ', ' + r.nc + (r.nc === 1 ? ' categoria unita.' : ' categorie unite.')); }
+  catch (e) { toast('Riordino non completato: riprova.', 'err'); }
 };
 A.catNew = (d) => {
   const p = d.p || '';
