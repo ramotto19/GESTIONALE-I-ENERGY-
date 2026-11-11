@@ -2037,6 +2037,7 @@ function vMieOre() {
   const dd = m === meseOggi() ? today() : m + '-01';
   let act = '<button class="btn p" data-a="oreNew" data-u="' + esc(u) + '" data-m="' + m + '" data-d="' + dd + '"' + (lock ? ' disabled' : '') + '>Registra ore</button>';
   if (adm) act = (st.k === 'ok' ? '<button class="btn" data-a="oreRiapri" data-u="' + esc(u) + '">Riapri il mese</button>' : righe.length ? '<button class="btn" data-a="oreAppr" data-u="' + esc(u) + '">Approva il mese</button>' : '') + act;
+  if (adm && righe.length) act = '<button class="btn" data-a="oreDettXls" data-u="' + esc(u) + '">Esporta Excel</button><button class="btn" data-a="oreDettPdf" data-u="' + esc(u) + '">Esporta PDF</button>' + act;
   let h = pageHead(titolo, sub, act);
   if (adm) h += '<div class="alert green" style="margin-bottom:12px">Stai vedendo la pagina dei dipendenti con i dati di <b>' + esc(nomeAcc(acc)) + '</b>. Tocca una riga per modificarla, oppure «Registra ore» per aggiungerne.</div><div class="fld" style="max-width:340px;margin-bottom:14px"><label for="viewsel">Persona</label><select id="viewsel" data-c="oreView">' + personeReg().map((p) => '<option value="' + esc(p.id) + '"' + (p.id === u ? ' selected' : '') + '>' + esc(p.nome) + '</option>').join('') + '</select></div>';
   h += '<div class="row sp" style="margin-bottom:14px">' + meseNav('omese') + '<span>' + bd(st.t, st.c) + '</span></div>';
@@ -2140,7 +2141,7 @@ function vOre() {
   const rs = righeAcc(m).map((r) => Object.assign(r, { om: oreMese(r.righe, m, dipDiAcc(r.a.id)) })), tot = rs.reduce((t, r) => ({ L: t.L + r.om.lavoro, T: t.T + r.om.tr, A: t.A + r.om.assenze, O: t.O + r.om.ord, S: t.S + r.om.str }), { L: 0, T: 0, A: 0, O: 0, S: 0 });
   const par = OREPAR(), gl = giorniLavMese(m).length;
   const senza = D('dipendenti').filter((d) => d.attivo !== false && !D('accessi').some((a) => a.dipendenteId === d.id));
-  const act = '<button class="btn p" data-a="oreXls">Riepilogo Excel</button><button class="btn" data-a="orePrint">Stampa / PDF</button><button class="btn" data-a="oreCsv" data-k="riep">Riepilogo CSV</button><button class="btn" data-a="oreCsv" data-k="det">Rapportini dettagliati (CSV)</button>';
+  const act = '<button class="btn p" data-a="oreDettXls">Dettaglio per persona (Excel)</button><button class="btn p" data-a="oreDettPdf">Dettaglio per persona (PDF)</button><button class="btn" data-a="oreXls">Riepilogo Excel</button><button class="btn" data-a="orePrint">Riepilogo PDF</button><button class="btn" data-a="oreCsv" data-k="riep">Riepilogo CSV</button><button class="btn" data-a="oreCsv" data-k="det">Dettaglio per persona (CSV)</button>';
   let h = pageHead('Ore del personale', 'Totali del mese per persona, pronti per paghe e amministrazione. Tocca una riga per aprire il registro di quella persona.', act) + tabs + '<div class="row sp" style="margin-bottom:14px">' + meseNav('omese') + '<span class="row"><button class="btn" data-a="oreRefresh">' + (S.oreLoading ? 'Aggiorno…' : 'Aggiorna') + '</button><button class="btn" data-a="oreApprAll">Approva tutti</button></span></div>';
   h += '<div class="alert green" style="margin-bottom:12px"><b>' + esc(meseLabel(m)) + ':</b> ' + gl + ' giorni lavorativi × ' + decOre(par.oreGiorno * 60) + ' ore = <b>' + fmtMin(Math.round(gl * par.oreGiorno * 60)) + '</b> ore dovute (festivi esclusi). Il sabato lavorato è tutto straordinario. Tragitto al ' + par.tragitto + '%. Le ore oltre il dovuto e tutto il sabato lavorato sono straordinari (qui vengono solo conteggiati).</div>';
   h += '<section class="card">' + (rs.length ? '<div class="scroll"><table class="tbl"><thead><tr><th>Persona</th><th class="r">Giorni</th><th class="r">Ore lavorate</th><th class="r">Tragitto (' + par.tragitto + '%)</th><th class="r">Assenze</th><th class="r">Ordinarie</th><th class="r">Straordinari</th><th>Interventi EOLO</th><th>Stato</th><th></th></tr></thead><tbody>' +
@@ -2279,10 +2280,26 @@ function riepilogoRows(m, rs) {
     T.g += o.giorni; T.dov += o.dovute; T.lav += o.lavoro; T.trr += o.trRaw; T.trc += o.tr; T.F += r.x.t.F; T.P += r.x.t.P; T.M += r.x.t.M; T.A += r.x.t.A; T.ord += o.ord; T.str += o.str; T.sab += o.sab; T.manc += manc;
     return [r.nome, m, o.giorni, fmtMin(o.dovute), fmtMin(o.lavoro), fmtMin(o.trRaw), fmtMin(o.tr), fmtMin(r.x.t.F), fmtMin(r.x.t.P), fmtMin(r.x.t.M), fmtMin(r.x.t.A), fmtMin(o.ord), fmtMin(o.str), fmtMin(o.sab), fmtMin(manc), r.eo.M, r.eo.A, r.eo.G, r.eo.K, r.st.t];
   });
-  const tot = ['TOTALE', m, T.g, fmtMin(T.dov), fmtMin(T.lav), fmtMin(T.trr), fmtMin(T.trc), fmtMin(T.F), fmtMin(T.P), fmtMin(T.M), fmtMin(T.A), fmtMin(T.ord), fmtMin(T.str), fmtMin(T.sab), fmtMin(T.manc), '', '', '', '', ''];
-  return [head].concat(rows, [tot]);
+  return [head].concat(rows);
 }
-const tabellaHtml = (rows, titolo) => '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + rows.map((r, i) => '<tr' + (i === 0 || i === rows.length - 1 ? ' style="font-weight:bold;background:#eeeeee"' : '') + '>' + r.map((c) => '<' + (i === 0 ? 'th' : 'td style="mso-number-format:\'\\@\'"') + '>' + esc(c) + '</' + (i === 0 ? 'th' : 'td') + '>').join('') + '</tr>').join('') + '</table>';
+const tabellaHtml = (rows, titolo, bl) => '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + rows.map((r, i) => '<tr' + (i === 0 || (bl && i === rows.length - 1) ? ' style="font-weight:bold;background:#eeeeee"' : '') + '>' + r.map((c) => '<' + (i === 0 ? 'th' : 'td style="mso-number-format:\'\\@\'"') + '>' + esc(c) + '</' + (i === 0 ? 'th' : 'td') + '>').join('') + '</tr>').join('') + '</table>';
+
+/* dettaglio per singola persona: riepilogo del mese + giorno per giorno + totale della persona (per la commercialista) */
+function persObj(u, m) { const a = G('accessi', u) || { id: u }, righe = righeOf(u, m); return { a: a, nome: nomeAcc(a), righe: righe, x: oreTot(righe), eo: eoloTot(righe), st: stBase(u, m, righe) }; }
+function dettPersona(p, m) {
+  const o = oreMese(p.righe, m, dipDiAcc(p.a.id)), par = OREPAR(), manc = m < meseOggi() ? o.manc : 0;
+  const sum = [['Ore dovute del mese', 'Ore lavorate', 'Tragitto effettivo', 'Tragitto computato (' + par.tragitto + '%)', 'Ferie', 'Permessi', 'Malattia', 'Altre assenze', 'Ore ordinarie', 'Ore straordinarie', 'di cui sabato', 'Ore mancanti'], [fmtMin(o.dovute), fmtMin(o.lavoro), fmtMin(o.trRaw), fmtMin(o.tr), fmtMin(p.x.t.F), fmtMin(p.x.t.P), fmtMin(p.x.t.M), fmtMin(p.x.t.A), fmtMin(o.ord), fmtMin(o.str), fmtMin(o.sab), fmtMin(manc)]];
+  const day = [['Data', 'Giorno', 'Tipo', 'Ingresso', 'Uscita', 'Pausa (min)', 'Ore lavorate (hh:mm)', 'Tragitto effettivo (hh:mm)', 'Tragitto computato (hh:mm)', 'Assenza (hh:mm)', 'Commessa o luogo', 'Attività']];
+  ordina(p.righe).forEach((x) => { const L = tipoR(x) === 'L', tr = L ? (Number(x.tr) || 0) : 0; day.push([fmtD(x.d), GG[parseD(x.d).getDay()], lab(TIPI_ORE, tipoR(x)), L ? (x.i || '') : '', L ? (x.u || '') : '', L ? (Number(x.p) || 0) : '', L ? fmtMin(minRiga(x)) : '', L ? fmtMin(tr) : '', L ? fmtMin(Math.round(tr * par.tragitto / 100)) : '', L ? '' : fmtMin(minRiga(x)), x.c || '', x.a || '']); });
+  day.push(['TOTALE ' + p.nome, '', '', '', '', '', fmtMin(o.lavoro), fmtMin(o.trRaw), fmtMin(o.tr), fmtMin(o.assenze), '', '']);
+  return { sum: sum, day: day };
+}
+const dettHtml = (ps, m, brk) => ps.map((p) => { const d = dettPersona(p, m); return '<div' + (brk ? ' style="page-break-after:always"' : '') + '><h2 style="font-family:Arial">' + esc(p.nome) + ' · ' + esc(meseLabel(m)) + '</h2>' + tabellaHtml(d.sum, 'Riepilogo del mese', false).replace(/^<h2[^>]*>.*?<\/h2>/, '') + '<br>' + tabellaHtml(d.day, 'Dettaglio giornaliero', true).replace(/^<h2[^>]*>.*?<\/h2>/, '') + '</div><br>'; }).join('');
+const saveXls = (html, nome) => { const blob = new Blob(['﻿<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>' + html + '</body></html>'], { type: 'application/vnd.ms-excel;charset=utf-8' }), url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = nome; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 4000); };
+const printHtml = (html) => { const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'; document.body.appendChild(f); f.srcdoc = '<html><head><meta charset="utf-8"><style>@page{size:A4 landscape;margin:10mm}</style></head><body>' + html + '</body></html>'; f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast('Stampa non riuscita.', 'err'); } setTimeout(() => f.remove(), 60000); }; };
+const dettSel = async (d) => { const m = S.mese || meseOggi(); if (d.u) return { m: m, ps: [persObj(d.u, m)] }; await loadAllOre(m, true); return { m: m, ps: righeAcc(m) }; };
+A.oreDettXls = async (d) => { const x = await dettSel(d); if (!x.ps.length) return; saveXls(dettHtml(x.ps, x.m, false), 'ore-' + x.m + (d.u ? '-' + String(x.ps[0].nome).toLowerCase().replace(/[^a-z0-9]+/g, '-') : '-dettaglio-per-persona') + '.xls'); };
+A.oreDettPdf = async (d) => { const x = await dettSel(d); if (!x.ps.length) return; printHtml(dettHtml(x.ps, x.m, true)); };
 A.oreXls = async () => {
   const m = S.mese || meseOggi(); await loadAllOre(m, true);
   const rows = riepilogoRows(m, righeAcc(m));
@@ -2308,7 +2325,7 @@ A.oreCsv = async (d) => {
   } else {
     nome = 'ore-' + m + '-rapportini.csv';
     rows = [['Persona', 'Data', 'Tipo', 'Ingresso', 'Uscita', 'Pausa (min)', 'Tragitto (min)', 'Ore nette (decimali)', 'Ore nette (hh:mm)', 'Commessa o luogo', 'Attività', 'EOLO manutenzioni', 'EOLO attivazioni', 'EOLO guasti', 'EOLO KO']];
-    rs.forEach((r) => ordina(r.righe).forEach((x) => { const eo = eoloOfRow(x); rows.push([r.nome, fmtD(x.d), lab(TIPI_ORE, tipoR(x)), x.i || '', x.u || '', tipoR(x) === 'L' ? (Number(x.p) || 0) : '', tipoR(x) === 'L' ? (Number(x.tr) || 0) : '', decOre(minRiga(x)), fmtMin(minRiga(x)), x.c || '', x.a || '', eo.M || '', eo.A || '', eo.G || '', eo.K || '']); }));
+    rs.forEach((r) => { ordina(r.righe).forEach((x) => { const eo = eoloOfRow(x); rows.push([r.nome, fmtD(x.d), lab(TIPI_ORE, tipoR(x)), x.i || '', x.u || '', tipoR(x) === 'L' ? (Number(x.p) || 0) : '', tipoR(x) === 'L' ? (Number(x.tr) || 0) : '', decOre(minRiga(x)), fmtMin(minRiga(x)), x.c || '', x.a || '', eo.M || '', eo.A || '', eo.G || '', eo.K || '']); }); if (r.righe.length) { const o = oreMese(r.righe, m, dipDiAcc(r.a.id)); rows.push(['TOTALE ' + r.nome, '', 'Lavoro + assenze', '', '', '', o.trRaw, decOre(o.lavoro + o.assenze), fmtMin(o.lavoro + o.assenze), '', '', r.eo.M || '', r.eo.A || '', r.eo.G || '', r.eo.K || '']); rows.push([]); } });
   }
   try { await dl.save({ filename: nome, data: toCsv(rows) }); } catch (e) { if (!e || e.code !== 'declined') toast('Esportazione non riuscita.', 'err'); }
 };
