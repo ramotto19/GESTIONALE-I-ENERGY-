@@ -2272,10 +2272,11 @@ A.accDel = async (d) => { if (!(await confirmBox(byEmail() ? 'Togliere l\u2019ac
 const csvCell = (x) => { const s = String(x == null ? '' : x); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 const toCsv = (rows) => '\uFEFF' + rows.map((r) => r.map(csvCell).join(';')).join('\r\n');
 /* riepilogo mensile del personale: stesse righe per CSV, Excel e stampa/PDF (ore in formato hh:mm, con la somma totale in fondo) */
+const KPI_HEAD = ['Ore dovute', 'Ore ordinarie', 'Straordinari', 'Tragitto', 'Ore lavorate', 'Giorni di lavoro', 'Ferie', 'Permessi', 'Malattia e altre assenze'];
+const kpiVals = (o, x) => [fmtMin(o.dovute), fmtMin(o.ord), fmtMin(o.str), fmtMin(o.tr), fmtMin(o.lavoro), o.giorni, fmtMin(x.t.F), fmtMin(x.t.P), fmtMin(x.t.M + x.t.A)];
 function riepilogoRows(m, rs) {
-  /* stesse colonne della tabella "Riepilogo mensile" a schermo */
-  const head = ['Persona', 'Giorni', 'Ore lavorate', 'Tragitto', 'Assenze', 'Ordinarie', 'Straordinari', 'Interventi EOLO', 'Stato'];
-  return [head].concat(rs.map((r) => { const o = oreMese(r.righe, m, dipDiAcc(r.a.id)); return [r.nome, o.giorni, fmtMin(o.lavoro), fmtMin(o.tr), fmtMin(o.assenze), fmtMin(o.ord), fmtMin(o.str), r.eo.tot ? eoloTxt(r.eo) : '', r.st.t]; }));
+  /* stesse voci del "Riepilogo del mese" nella pagina di ogni persona */
+  return [['Persona'].concat(KPI_HEAD)].concat(rs.map((r) => [r.nome].concat(kpiVals(oreMese(r.righe, m, dipDiAcc(r.a.id)), r.x))));
 }
 const tabellaHtml = (rows, titolo, bl) => '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + rows.map((r, i) => '<tr' + (i === 0 || (bl && i === rows.length - 1) ? ' style="font-weight:bold;background:#eeeeee"' : '') + '>' + r.map((c) => '<' + (i === 0 ? 'th' : 'td style="mso-number-format:\'\\@\'"') + '>' + esc(c) + '</' + (i === 0 ? 'th' : 'td') + '>').join('') + '</tr>').join('') + '</table>';
 
@@ -2283,7 +2284,7 @@ const tabellaHtml = (rows, titolo, bl) => '<h2 style="font-family:Arial">' + esc
 function persObj(u, m) { const a = G('accessi', u) || { id: u }, righe = righeOf(u, m); return { a: a, nome: nomeAcc(a), righe: righe, x: oreTot(righe), eo: eoloTot(righe), st: stBase(u, m, righe) }; }
 function dettPersona(p, m) {
   const o = oreMese(p.righe, m, dipDiAcc(p.a.id)), par = OREPAR(), manc = m < meseOggi() ? o.manc : 0;
-  const sum = [['Ore dovute', 'Giorni', 'Ore lavorate', 'Tragitto', 'Assenze', 'Ordinarie', 'Straordinari'], [fmtMin(o.dovute), o.giorni, fmtMin(o.lavoro), fmtMin(o.tr), fmtMin(o.assenze), fmtMin(o.ord), fmtMin(o.str)]];
+  const sum = [KPI_HEAD, kpiVals(o, p.x)];
   const day = [['Data', 'Giorno', 'Tipo', 'Ingresso', 'Uscita', 'Pausa (min)', 'Ore lavorate (hh:mm)', 'Tragitto (hh:mm)', 'Assenza (hh:mm)', 'Commessa o luogo', 'Attività']];
   ordina(p.righe).forEach((x) => { const L = tipoR(x) === 'L', tr = L ? (Number(x.tr) || 0) : 0; day.push([fmtD(x.d), GG[parseD(x.d).getDay()], lab(TIPI_ORE, tipoR(x)), L ? (x.i || '') : '', L ? (x.u || '') : '', L ? (Number(x.p) || 0) : '', L ? fmtMin(minRiga(x)) : '', L ? fmtMin(tr) : '', L ? '' : fmtMin(minRiga(x)), x.c || '', x.a || '']); });
   day.push(['TOTALE ' + p.nome, '', '', '', '', '', fmtMin(o.lavoro), fmtMin(o.tr), fmtMin(o.assenze), '', '']);
