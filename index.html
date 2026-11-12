@@ -2913,7 +2913,11 @@ async function sbApi(action, p) {
   switch (action) {
     case 'whoami': {
       const m = u.user_metadata || {}, name = m.full_name || m.name || email;
-      if (!email || !u.app_metadata || u.app_metadata.provider !== 'google') return { ok: true, unauthorized: true, email: email, name: name };
+      /* basta un'email autenticata: l'abilitazione vera e propria è il record accessi/<email> (o
+         l'elenco ADMINS_LC) controllato qui sotto. Prima si accettava solo il provider "google", e
+         questo rifiutava i dipendenti che entrano con email e password (provider "email") anche se
+         regolarmente abilitati. */
+      if (!email) return { ok: true, unauthorized: true, email: email, name: name };
       const r = await sb.from('docs').select('data').eq('path', 'accessi/' + email).maybeSingle();
       if (r.error) throw sbErr(r.error);
       let data = r.data ? r.data.data : null;
