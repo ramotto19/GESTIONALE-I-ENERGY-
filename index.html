@@ -1934,8 +1934,16 @@ async function resolveProf() {
 const righeOf = (u, m) => (u === S.uid && S.myOre.mese === m ? S.myOre.righe : ((S.oreAll[u + '|' + m] || {}).righe || []));
 const nomeAcc = (a) => { const d = G('dipendenti', a.dipendenteId); return d ? nomeD(d).trim() : (S.prof[a.id] || a.id); };
 const byEmail = () => !!(user && user.byEmail);
+/* documento del mese: oltre alle righe salviamo anche nome e cognome della persona, le ore lavorate,
+   il mese e l'anno. Così ogni registro è leggibile da solo (anche se un domani l'email di accesso
+   cambia) e le ore non collegate si riconoscono dal nome invece che dall'indirizzo. nomeOverride
+   serve quando l'accesso non è ancora stato creato (es. mentre si dà accesso a una persona). */
+function oreDocObj(u, m, righe, nomeOverride) {
+  const rr = ordina(righe), p = String(m).split('-');
+  return { righe: rr, aggiornato: today(), nome: nomeOverride || nomeAcc(G('accessi', u) || { id: u }), ore: fmtMin(oreTot(rr).t.L || 0), mese: MESI[(+p[1] || 1) - 1], anno: +p[0] || '' };
+}
 async function saveRighe(u, m, righe) {
-  await put('ore/' + u + '/mesi', m, { righe: ordina(righe), aggiornato: today() });
+  await put('ore/' + u + '/mesi', m, oreDocObj(u, m, righe));
   if (u !== S.uid || S.admin) await loadOre(u, m);
   queueRender();
 }
@@ -2191,7 +2199,7 @@ A.oreAbilita = async (d) => {
     let n = 0;
     for (let k = 0; k <= 36; k++) {
       const m = addMese(meseOggi(), -k);
-      try { const snap = await db.doc('ore/' + interno + '/mesi/' + m).get(); const rr = (snap.exists && snap.data() && snap.data().righe) || []; if (rr.length) { await put('ore/' + em + '/mesi', m, { righe: rr, aggiornato: today() }); n++; } } catch (e) { /* mese senza dati */ }
+      try { const snap = await db.doc('ore/' + interno + '/mesi/' + m).get(); const rr = (snap.exists && snap.data() && snap.data().righe) || []; if (rr.length) { await put('ore/' + em + '/mesi', m, oreDocObj(em, m, rr, nome)); n++; } } catch (e) { /* mese senza dati */ }
     }
     if (vecchio.approvati) nuovo.approvati = vecchio.approvati;
     await put('accessi', id, nuovo);
@@ -2213,7 +2221,7 @@ async function migraOre(fromId, toId) {
     const righe = (snap.exists && snap.data() && snap.data().righe) || []; if (!righe.length) continue;
     let gia = []; try { const s2 = await db.doc('ore/' + toId + '/mesi/' + m).get(); gia = (s2.exists && s2.data() && s2.data().righe) || []; } catch (e) { gia = []; }
     const byId = {}; gia.concat(righe).forEach((r) => { if (r && r.id != null && !byId[r.id]) byId[r.id] = r; });
-    await put('ore/' + toId + '/mesi', m, { righe: ordina(Object.keys(byId).map((i) => byId[i])), aggiornato: today() });
+    await put('ore/' + toId + '/mesi', m, oreDocObj(toId, m, Object.keys(byId).map((i) => byId[i])));
     await db.doc('ore/' + fromId + '/mesi/' + m).delete(); n++;
   }
   return n;
@@ -2224,17 +2232,17 @@ async function migraOre(fromId, toId) {
 A.oreOrfane = async () => {
   toast('Cerco le ore non collegate…');
   let rows = [];
-  try { const sb = await sbClient(); const r = await sb.from('docs').select('path').like('path', 'ore/%'); if (r && r.error) throw r.error; rows = (r && r.data) || []; }
+  try { const sb = await sbClient(); const r = await sb.from('docs').select('path,data').like('path', 'ore/%'); if (r && r.error) throw r.error; rows = (r && r.data) || []; }
   catch (e) { toast('Ricerca non riuscita: ' + errMsg(e), 'err'); return; }
-  const cnt = {};
-  rows.forEach((x) => { const mm = String(x.path || '').match(/^ore\/(.+)\/mesi\/[^/]+$/); if (mm) cnt[mm[1]] = (cnt[mm[1]] || 0) + 1; });
+  const cnt = {}, info = {};
+  rows.forEach((x) => { const mm = String(x.path || '').match(/^ore\/(.+)\/mesi\/[^/]+$/); if (!mm) return; const e = mm[1], d = x.data || {}; cnt[e] = (cnt[e] || 0) + 1; if (!info[e]) info[e] = { nome: '', mesi: [] }; if (d.nome && !info[e].nome) info[e].nome = d.nome; if (d.mese) info[e].mesi.push((d.mese || '') + ' ' + (d.anno || '') + (d.ore ? ' · ' + d.ore : '')); });
   const attuali = new Set(D('accessi').map((a) => a.id));
   const orfane = Object.keys(cnt).filter((e) => !attuali.has(e)).sort();
   if (!orfane.length) { toast('Nessuna ora orfana: tutte le ore registrate sono collegate a un accesso.'); return; }
   const people = personeReg();
   if (!people.length) { toast('Collega prima almeno un dipendente a un account, poi potrai assegnargli le ore orfane.'); return; }
   const opts = people.map((p) => '<option value="' + esc(p.id) + '">' + esc(p.nome) + '</option>').join('');
-  const body = orfane.map((e, i) => '<div class="blk"><div style="flex:1;min-width:0"><b style="word-break:break-all">' + esc(e) + '</b><div class="small muted">' + cnt[e] + (cnt[e] === 1 ? ' mese di ore registrate' : ' mesi di ore registrate') + '</div></div><div class="row" style="gap:6px;flex-wrap:wrap"><select id="orf' + i + '">' + opts + '</select><button type="button" class="btn p sm" data-a="orfMigra" data-e="' + esc(e) + '" data-i="' + i + '">Porta qui</button></div></div>').join('');
+  const body = orfane.map((e, i) => { const nm = (info[e] || {}).nome, det = ((info[e] || {}).mesi || []).sort().join(' · '); return '<div class="blk"><div style="flex:1;min-width:0">' + (nm ? '<b>' + esc(nm) + '</b><div class="small muted" style="word-break:break-all">' + esc(e) + '</div>' : '<b style="word-break:break-all">' + esc(e) + '</b>') + '<div class="small muted">' + cnt[e] + (cnt[e] === 1 ? ' mese di ore registrate' : ' mesi di ore registrate') + (det ? ': ' + esc(det) : '') + '</div></div><div class="row" style="gap:6px;flex-wrap:wrap"><select id="orf' + i + '">' + opts + '</select><button type="button" class="btn p sm" data-a="orfMigra" data-e="' + esc(e) + '" data-i="' + i + '">Porta qui</button></div></div>'; }).join('');
   openModal('<div><h2 class="mt">Ore non collegate a nessun accesso</h2><p class="small muted" style="margin-top:6px">Ore registrate con un indirizzo che non ha più accesso (di solito dopo un cambio email). Scegli la persona a cui appartengono e premi «Porta qui»: le ore vengono spostate sul suo accesso attuale, nulla va perso.</p>' + body + '<div class="row sp" style="margin-top:14px"><button type="button" class="btn" data-a="formCancel">Chiudi</button></div></div>');
 };
 A.orfMigra = async (d) => {
@@ -2280,7 +2288,7 @@ A.orePassa = async (d) => {
       let snap; try { snap = await db.doc('ore/' + old.id + '/mesi/' + m).get(); } catch (e) { continue; }
       const righe = (snap.exists && snap.data() && snap.data().righe) || []; if (!righe.length) continue;
       let gia = []; try { const s2 = await db.doc('ore/' + mail + '/mesi/' + m).get(); gia = (s2.exists && s2.data() && s2.data().righe) || []; } catch (e) { gia = []; }
-      await put('ore/' + mail + '/mesi', m, { righe: ordina(gia.concat(righe)), aggiornato: today() });
+      await put('ore/' + mail + '/mesi', m, oreDocObj(mail, m, gia.concat(righe), nome));
       await db.doc('ore/' + old.id + '/mesi/' + m).delete(); n++;
     }
     await put('accessi', mail, { ruolo: 'dipendente', dipendenteId: dip.id, creatoIl: today(), approvati: old.approvati || {} });
