@@ -10,10 +10,18 @@
  *  Impostazioni progetto  ▸  Proprietà script  ▸  Aggiungi proprietà
  *  (le chiavi restano sul server di Google, fuori dal codice e fuori da GitHub)
  *
- *    DOCEASY_BASE          es. https://api.doceasy.it           (base URL dell'API)
- *    DOCEASY_API_KEY       la chiave che generi nella sezione "creazione API" di DocEasy
- *    SUPABASE_SERVICE_KEY  la chiave service_role del progetto Supabase
- *                          (Supabase ▸ Project Settings ▸ API ▸ service_role secret)
+ *    DOCEASY_BASE          https://webapide.aliasgrouplab.it   (URL base dell'API DocEasy)
+ *    DOCEASY_API_KEY       API Key   (DocEasy ▸ Area Clienti ▸ Gestisci API Key)
+ *    DOCEASY_API_SECRET    API Secret (stessa pagina)
+ *    DOCEASY_PIVA          la partita IVA della tua azienda (header richiesto da DocEasy)
+ *    SUPABASE_SERVICE_KEY  la chiave segreta del progetto Supabase (sb_secret_… oppure
+ *                          la legacy service_role; Supabase ▸ Project Settings ▸ API Keys)
+ *
+ *  Nota sui dati importati: l'endpoint "elenco" di DocEasy restituisce numero, data,
+ *  controparte, partita IVA e TOTALE del documento. Non espone imponibile, IVA e
+ *  scadenza (quelli stanno nel dettaglio della singola fattura): per ora restano vuoti
+ *  e si possono compilare a mano nella scheda, oppure si aggiunge in seguito una
+ *  chiamata al dettaglio /api/documento{attivo|passivo}/{id}/json.
  *
  *  NON mettere queste chiavi nel codice, nel repository o nel frontend (index.html):
  *  index.html è pubblico. La service_role di Supabase in particolare scavalca le
@@ -51,53 +59,55 @@ function syncDocEasy() {
   return rep;
 }
 
-/* ===== DocEasy: l'UNICO pezzo da adattare ai TUOI endpoint =====
- * Deve restituire un array di fatture grezze per la direzione richiesta
- * ('P' = passive/ricevute, 'A' = attive/emesse) a partire dalla data `dalGiorno`.
- * Completa l'URL, i parametri e lo schema di autenticazione con quanto trovi
- * nella documentazione della tua sezione API di DocEasy.                      */
+/* ===== DocEasy: elenco fatture passive/attive =====
+ * Endpoint ufficiali (webapide.aliasgrouplab.it):
+ *   GET /api/documentoattivo/elenco   → fatture emesse (attive)
+ *   GET /api/documentopassivo/elenco  → fatture ricevute (passive)
+ * L'elenco torna gli ultimi documenti; qui tengo solo quelli dalla finestra
+ * (`dalGiorno`) in poi, i doppioni li scarta comunque fattId_.                */
 function doceasyFetch_(dir, dalGiorno) {
-  var base = getProp_('DOCEASY_BASE');
-  var key = getProp_('DOCEASY_API_KEY');
-  // ⚠️ ADATTA questo blocco: nome endpoint, nome dei parametri e header di auth
-  //    dipendono dall'API DocEasy. Esempio generico:
-  var tipo = (dir === 'P') ? 'ricevute' : 'emesse';
-  var url = base.replace(/\/+$/, '') + '/fatture?tipo=' + tipo + '&dal=' + dalGiorno;
-  var res = UrlFetchApp.fetch(url, {
-    method: 'get',
-    muteHttpExceptions: true,
-    headers: {
-      // ⚠️ ADATTA: alcune API vogliono 'Authorization: Bearer <key>',
-      //    altre 'X-Api-Key: <key>' o un parametro in query. Vedi la doc DocEasy.
-      'Authorization': 'Bearer ' + key,
-      'Accept': 'application/json'
-    }
+  var base = getProp_('DOCEASY_BASE').replace(/\/+$/, '');
+  var seg = (dir === 'P') ? 'documentopassivo' : 'documentoattivo';
+  var res = UrlFetchApp.fetch(base + '/api/' + seg + '/elenco', {
+    method: 'get', muteHttpExceptions: true, headers: doceasyHeaders_()
   });
   if (res.getResponseCode() >= 300) {
-    throw new Error('DocEasy HTTP ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 300));
+    throw new Error('DocEasy HTTP ' + res.getResponseCode() + ' su ' + seg + ': ' + res.getContentText().slice(0, 300));
   }
-  var body = JSON.parse(res.getContentText() || '{}');
-  return body.items || body.fatture || body.data || (Array.isArray(body) ? body : []);
+  var body = JSON.parse(res.getContentText() || '[]');
+  var lista = Array.isArray(body) ? body : (body.items || body.data || body.elenco || []);
+  return lista.filter(function (d) { return isoDate_(d.data || d.dataDocumento) >= dalGiorno; });
+}
+/* autenticazione DocEasy: tutto negli header (APIKey + APISecret obbligatori,
+ * PartitaIva per indicare l'azienda) — niente credenziali in URL */
+function doceasyHeaders_() {
+  return {
+    'APIKey': getProp_('DOCEASY_API_KEY'),
+    'APISecret': getProp_('DOCEASY_API_SECRET'),
+    'PartitaIva': getProp_('DOCEASY_PIVA'),
+    'Accept': 'application/json'
+  };
 }
 
-/* ===== mappa una fattura DocEasy nel record del gestionale =====
- * ⚠️ ADATTA i nomi dei campi di sinistra (raw.*) a quelli reali dell'API DocEasy.
- * I campi di destra sono quelli che la pagina Fatture del gestionale già usa.      */
+/* ===== mappa una fattura DocEasy (elenco) nel record del gestionale =====
+ * Campi dell'elenco DocEasy: numero, data, denominazione (o nome+cognome),
+ * partitaIva/codiceFiscale, importo (totale), tipoDocumento.                       */
 function mapDocEasy_(raw, dir) {
-  var imponibile = round2_(num_(raw.imponibile));
-  var iva = round2_(num_(raw.iva));
-  var tot = round2_(num_(raw.totale) || (imponibile + iva));
+  var controparte = String(raw.denominazione || [raw.nome, raw.cognome].filter(Boolean).join(' ') || '').trim();
+  var td = String(raw.tipoDocumento || raw.tipoFattura || '').toUpperCase();
+  var segno = (td === 'TD04') ? -1 : 1;                   // nota di credito → importo negativo (come l'import XML)
   return {
     dir: dir,
-    numero: String(raw.numero || raw.numeroDocumento || '').trim(),
+    numero: String(raw.numero || '').trim(),
     data: isoDate_(raw.data || raw.dataDocumento),        // → 'YYYY-MM-DD' (deve combaciare con l'import XML)
-    controparte: String(raw.controparte || raw.denominazione || raw.cedente || raw.cessionario || '').trim(),
-    piva: String(raw.piva || raw.partitaIva || '').trim(),
-    imponibile: imponibile,
-    iva: iva,
-    tot: tot,
-    scadenza: raw.scadenza ? isoDate_(raw.scadenza) : '',
-    descrizione: String(raw.causale || raw.descrizione || '').slice(0, 400),
+    controparte: controparte,
+    piva: String(raw.partitaIva || raw.codiceFiscale || '').trim(),
+    imponibile: 0,                                         // non nell'elenco (vedi nota in testa al file)
+    iva: 0,                                                // non nell'elenco
+    tot: round2_(segno * num_(raw.importo)),
+    scadenza: '',                                          // non nell'elenco: sta nel dettaglio della fattura
+    descrizione: '',
+    tipoDoc: td,
     pagata: false,
     importatoIl: today_()
   };
@@ -155,6 +165,22 @@ function isoDate_(x) {
   if (m) return m[3] + '-' + m[2] + '-' + m[1];
   var dt = new Date(s);
   return isNaN(dt.getTime()) ? s.slice(0, 10) : Utilities.formatDate(dt, 'Europe/Rome', 'yyyy-MM-dd');
+}
+
+/* ===== prova manuale: eseguila UNA volta dall'editor e guarda il Log (Esecuzioni) =====
+ * Non scrive niente nel gestionale: mostra solo cosa torna DocEasy e come viene
+ * mappato, così verifichi che chiavi, P.IVA ed endpoint siano a posto prima del trigger. */
+function testDocEasy() {
+  ['P', 'A'].forEach(function (dir) {
+    try {
+      var l = doceasyFetch_(dir, isoDaysAgo_(60));
+      Logger.log(dir + ': ' + l.length + ' documenti negli ultimi 60 giorni');
+      if (l[0]) {
+        Logger.log(dir + ' · grezzo DocEasy: ' + JSON.stringify(l[0]));
+        Logger.log(dir + ' · mappato gestionale: ' + JSON.stringify(mapDocEasy_(l[0], dir)));
+      }
+    } catch (e) { Logger.log(dir + ' · ERRORE: ' + e); }
+  });
 }
 
 /* ===== crea l'attivatore giornaliero (eseguila UNA volta a mano dall'editor) ===== */
