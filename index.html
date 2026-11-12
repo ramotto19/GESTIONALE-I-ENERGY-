@@ -2396,18 +2396,26 @@ function dettPersona(p, m) {
 }
 const dettHtml = (ps, m, brk) => ps.map((p) => { const d = dettPersona(p, m); return '<div' + (brk ? ' style="page-break-after:always"' : '') + '><h2 style="font-family:Arial">' + esc(p.nome) + ' · ' + esc(meseLabel(m)) + '</h2>' + tabellaHtml(d.sum, 'Riepilogo del mese', false).replace(/^<h2[^>]*>.*?<\/h2>/, '') + '<br>' + tabellaHtml(d.day, 'Dettaglio giornaliero', true).replace(/^<h2[^>]*>.*?<\/h2>/, '') + '</div><br>'; }).join('');
 const saveXls = (html, nome) => { const blob = new Blob(['﻿<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>' + html + '</body></html>'], { type: 'application/vnd.ms-excel;charset=utf-8' }), url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = nome; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 4000); };
-/* stampa / salva come PDF. Su iPhone la stampa da iframe nascosto non parte: apriamo una pagina di
-   anteprima in una nuova scheda con un pulsante «Stampa / Salva PDF» (che chiama window.print nel
-   contesto giusto, affidabile su iOS) e un tentativo di stampa automatica. Se la nuova scheda è
-   bloccata (popup), si ricade sull'iframe nascosto, che su desktop funziona. */
+/* stampa / salva come PDF. Su iPhone la stampa da iframe nascosto non parte, e una nuova scheda
+   nell'app installata resta aperta senza modo di chiuderla. Quindi mostriamo l'anteprima come
+   pannello a schermo intero dentro l'app, con «Chiudi» e «Stampa / Salva PDF». In stampa nascondiamo
+   tutto il resto dell'app e lasciamo solo il contenuto, in A4 orizzontale. */
+let printStyleAdded = false;
 const printHtml = (html) => {
-  const doc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stampa</title><style>@page{size:A4 landscape;margin:10mm}body{margin:0;font-family:Arial,Helvetica,sans-serif}.toolbar{position:sticky;top:0;display:flex;gap:10px;align-items:center;justify-content:space-between;background:#1B1F23;color:#fff;padding:12px 16px}.toolbar button{padding:10px 16px;border:0;border-radius:10px;background:#fff;color:#1B1F23;font-weight:700;font-size:15px}.content{padding:12px}@media print{.toolbar{display:none}.content{padding:0}}</style></head><body><div class="toolbar"><span>Anteprima — tocca per stampare o salvare in PDF</span><button onclick="window.print()">Stampa / Salva PDF</button></div><div class="content">' + html + '</div><scr' + 'ipt>window.addEventListener("load",function(){setTimeout(function(){try{window.focus();window.print();}catch(e){}},500);});<\/scr' + 'ipt></body></html>';
-  let w = null; try { w = window.open('', '_blank'); } catch (e) { w = null; }
-  if (w && w.document) { w.document.open(); w.document.write(doc); w.document.close(); return; }
-  /* fallback desktop: iframe nascosto */
-  const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'; document.body.appendChild(f);
-  f.srcdoc = doc.replace(/<div class="toolbar">[\s\S]*?<\/div>/, '');
-  f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast('Stampa non riuscita: usa «Esporta Excel».', 'err'); } setTimeout(() => f.remove(), 60000); };
+  const old = document.getElementById('printOverlay'); if (old) old.remove();
+  if (!printStyleAdded) {
+    const st = document.createElement('style');
+    st.textContent = '#printOverlay{position:fixed;inset:0;z-index:9999;background:#fff;overflow:auto;-webkit-overflow-scrolling:touch}#printOverlay .ptoolbar{position:sticky;top:0;display:flex;gap:10px;align-items:center;justify-content:space-between;background:#1B1F23;color:#fff;padding:12px 16px}#printOverlay .ptoolbar button{padding:10px 16px;border:0;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer}#printOverlay .ptoolbar .pclose{background:#3a3f45;color:#fff}#printOverlay .ptoolbar .pprint{background:#fff;color:#1B1F23}#printOverlay .pbody{padding:12px;color:#000}@media print{@page{size:A4 landscape;margin:10mm}body{background:#fff!important}body>*:not(#printOverlay){display:none!important}#printOverlay{position:static!important;overflow:visible!important}#printOverlay .ptoolbar{display:none!important}#printOverlay .pbody{padding:0!important}}';
+    document.head.appendChild(st); printStyleAdded = true;
+  }
+  const ov = document.createElement('div'); ov.id = 'printOverlay';
+  ov.innerHTML = '<div class="ptoolbar"><button class="pclose" type="button">← Chiudi</button><span style="font-family:Arial;font-size:14px">Anteprima</span><button class="pprint" type="button">Stampa / Salva PDF</button></div><div class="pbody">' + html + '</div>';
+  document.body.appendChild(ov);
+  const chiudi = () => { ov.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') chiudi(); };
+  ov.querySelector('.pclose').onclick = chiudi;
+  ov.querySelector('.pprint').onclick = () => { try { window.print(); } catch (e) { toast('Stampa non riuscita: usa «Esporta Excel».', 'err'); } };
+  document.addEventListener('keydown', onKey);
 };
 const dettSel = async (d) => { const m = S.mese || meseOggi(); if (d.u) return { m: m, ps: [persObj(d.u, m)] }; await loadAllOre(m, true); return { m: m, ps: righeAcc(m) }; };
 A.oreDettXls = async (d) => { const x = await dettSel(d); if (!x.ps.length) return; saveXls(dettHtml(x.ps, x.m, false), 'ore-' + x.m + (d.u ? '-' + String(x.ps[0].nome).toLowerCase().replace(/[^a-z0-9]+/g, '-') : '-dettaglio-per-persona') + '.xls'); };
