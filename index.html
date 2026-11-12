@@ -2384,14 +2384,14 @@ function dettPersona(p, m) {
   const o = oreMese(p.righe, m, dipDiAcc(p.a.id)), par = OREPAR(), manc = m < meseOggi() ? o.manc : 0;
   const sum = [KPI_HEAD, kpiVals(o, p.x)];
   const soglia = Math.round(o.og * 60), fe = festiviDi(+m.slice(0, 4)), acc = {};
-  const day = [['Data', 'Giorno', 'Tipo', 'Ingresso', 'Uscita', 'Pausa (min)', 'Ore lavorate (hh:mm)', 'Straordinari (hh:mm)', 'Tragitto (hh:mm)', 'Assenza (hh:mm)', 'Commessa o luogo', 'Attività']];
+  const day = [['Data', 'Giorno', 'Tipo', 'Ingresso', 'Uscita', 'Pausa (min)', 'Ore ordinarie (hh:mm)', 'Straordinari (hh:mm)', 'Ore lavorate (hh:mm)', 'Tragitto (hh:mm)', 'Assenza (hh:mm)', 'Commessa o luogo']];
   ordina(p.righe).forEach((x) => {
     const L = tipoR(x) === 'L', tr = L ? (Number(x.tr) || 0) : 0, w = L ? minRiga(x) : 0;
-    let strp = 0;
-    if (L) { const base = Math.max(0, w - tr), wd = parseD(x.d).getDay(), a0 = acc[x.d] || 0, festivo = wd === 0 || wd === 6 || fe.has(x.d), ordp = festivo ? 0 : Math.max(0, Math.min(soglia, a0 + base) - a0); strp = base - ordp; acc[x.d] = a0 + base; }
-    day.push([fmtD(x.d), GG[parseD(x.d).getDay()], lab(TIPI_ORE, tipoR(x)), L ? (x.i || '') : '', L ? (x.u || '') : '', L ? (Number(x.p) || 0) : '', L ? fmtMin(w) : '', L ? fmtMin(strp) : '', L ? fmtMin(tr) : '', L ? '' : fmtMin(minRiga(x)), x.c || '', x.a || '']);
+    let strp = 0, ordp = 0;
+    if (L) { const base = Math.max(0, w - tr), wd = parseD(x.d).getDay(), a0 = acc[x.d] || 0, festivo = wd === 0 || wd === 6 || fe.has(x.d); ordp = festivo ? 0 : Math.max(0, Math.min(soglia, a0 + base) - a0); strp = base - ordp; acc[x.d] = a0 + base; }
+    day.push([fmtD(x.d), GG[parseD(x.d).getDay()], lab(TIPI_ORE, tipoR(x)), L ? (x.i || '') : '', L ? (x.u || '') : '', L ? (Number(x.p) || 0) : '', L ? fmtMin(ordp) : '', L ? fmtMin(strp) : '', L ? fmtMin(w) : '', L ? fmtMin(tr) : '', L ? '' : fmtMin(minRiga(x)), x.c || '']);
   });
-  day.push(['TOTALE ' + p.nome, '', '', '', '', '', fmtMin(o.lavoro), fmtMin(o.str), fmtMin(o.tr), fmtMin(o.assenze), '', '']);
+  day.push(['TOTALE ' + p.nome, '', '', '', '', '', fmtMin(o.ord), fmtMin(o.str), fmtMin(o.lavoro), fmtMin(o.tr), fmtMin(o.assenze), '']);
   return { sum: sum, day: day };
 }
 const dettHtml = (ps, m, brk) => ps.map((p) => { const d = dettPersona(p, m); return '<div' + (brk ? ' style="page-break-after:always"' : '') + '><h2 style="font-family:Arial">' + esc(p.nome) + ' · ' + esc(meseLabel(m)) + '</h2>' + tabellaHtml(d.sum, 'Riepilogo del mese', false).replace(/^<h2[^>]*>.*?<\/h2>/, '') + '<br>' + tabellaHtml(d.day, 'Dettaglio giornaliero', true).replace(/^<h2[^>]*>.*?<\/h2>/, '') + '</div><br>'; }).join('');
