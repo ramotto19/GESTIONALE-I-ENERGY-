@@ -2367,13 +2367,13 @@ A.accDel = async (d) => { if (!(await confirmBox(byEmail() ? 'Togliere l\u2019ac
 const csvCell = (x) => { const s = String(x == null ? '' : x); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 const toCsv = (rows) => '\uFEFF' + rows.map((r) => r.map(csvCell).join(';')).join('\r\n');
 /* riepilogo mensile del personale: stesse righe per CSV, Excel e stampa/PDF (ore in formato hh:mm, con la somma totale in fondo) */
-const KPI_HEAD = ['Ore dovute', 'Ore ordinarie', 'Straordinari', 'Tragitto', 'Ore lavorate', 'Giorni di lavoro', 'Ferie', 'Permessi', 'Malattia e altre assenze'];
-const kpiVals = (o, x) => [fmtMin(o.dovute), fmtMin(o.ord), fmtMin(o.str), fmtMin(o.tr), fmtMin(o.lavoro), o.giorni, fmtMin(x.t.F), fmtMin(x.t.P), fmtMin(x.t.M + x.t.A)];
+const KPI_HEAD = ['Giorni di lavoro', 'Ore dovute (mensili)', 'Ore ordinarie', 'Straordinari', 'Tragitto', 'Ore lavorate', 'Ferie', 'Permessi', 'Malattia e altre assenze'];
+const kpiVals = (o, x) => [o.giorni, fmtMin(o.dovute), fmtMin(o.ord), fmtMin(o.str), fmtMin(o.tr), fmtMin(o.lavoro), fmtMin(x.t.F), fmtMin(x.t.P), fmtMin(x.t.M + x.t.A)];
 function riepilogoRows(m, rs) {
   /* stesse voci del "Riepilogo del mese" nella pagina di ogni persona */
   const rows = rs.map((r) => [r.nome].concat(kpiVals(oreMese(r.righe, m, dipDiAcc(r.a.id)), r.x)));
   const T = rs.reduce((t, r) => { const o = oreMese(r.righe, m, dipDiAcc(r.a.id)), xt = r.x.t; t.dovute += o.dovute; t.ord += o.ord; t.str += o.str; t.tr += o.tr; t.lavoro += o.lavoro; t.giorni += o.giorni; t.F += xt.F; t.P += xt.P; t.MA += xt.M + xt.A; return t; }, { dovute: 0, ord: 0, str: 0, tr: 0, lavoro: 0, giorni: 0, F: 0, P: 0, MA: 0 });
-  const tot = ['TOTALE', fmtMin(T.dovute), fmtMin(T.ord), fmtMin(T.str), fmtMin(T.tr), fmtMin(T.lavoro), T.giorni, fmtMin(T.F), fmtMin(T.P), fmtMin(T.MA)];
+  const tot = ['TOTALE', T.giorni, fmtMin(T.dovute), fmtMin(T.ord), fmtMin(T.str), fmtMin(T.tr), fmtMin(T.lavoro), fmtMin(T.F), fmtMin(T.P), fmtMin(T.MA)];
   return rs.length ? [['Persona'].concat(KPI_HEAD)].concat(rows, [tot]) : [['Persona'].concat(KPI_HEAD)];
 }
 const tabellaHtml = (rows, titolo, bl) => '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + rows.map((r, i) => '<tr' + (i === 0 || (bl && i === rows.length - 1) ? ' style="font-weight:bold;background:#eeeeee"' : '') + '>' + r.map((c) => '<' + (i === 0 ? 'th' : 'td style="mso-number-format:\'\\@\'"') + '>' + esc(c) + '</' + (i === 0 ? 'th' : 'td') + '>').join('') + '</tr>').join('') + '</table>';
