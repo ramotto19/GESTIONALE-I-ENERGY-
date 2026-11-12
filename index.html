@@ -3720,10 +3720,14 @@ function primaNotaHtml(list, titolo) {
   const tot = '<tr style="font-weight:bold;background:#eeeeee">' + [pnCellT('TOTALE'), pnCellT(''), pnCellT(''), pnCellT(''), pnCellT(''), pnCellN(SA('imponibile')), pnCellN(SA('iva')), pnCellN(SA('tot')), pnCellN(SB('A', 'tot')), pnCellN(SB('P', 'tot')), pnCellT(''), pnCellT(''), pnCellT(''), pnCellT(''), pnCellT('')].join('') + '</tr>';
   return '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + head + rows + tot + '</table>';
 }
+const meseCap = (m) => meseLabel(m).charAt(0).toUpperCase() + meseLabel(m).slice(1);
 A.fatPrimaNota = () => {
-  const list = D('fatture').slice().sort((a, b) => String(a.data || '').localeCompare(String(b.data || '')) || String(a.numero || '').localeCompare(String(b.numero || '')));
-  if (!list.length) { toast('Nessuna fattura da esportare.'); return; }
-  saveXls(primaNotaHtml(list, 'Prima nota fatture — ' + fmtD(today())), 'prima-nota-fatture.xls');
+  const mesi = []; for (let k = 0; k >= -15; k--) mesi.push(addMese(meseOggi(), k));
+  openForm({ title: 'Prima nota — scegli il mese', info: 'Esporta in Excel tutte le fatture (passive e attive) del mese scelto, in ordine di data, pronte per la commercialista.', fields: [{ k: 'mese', l: 'Mese', t: 'select', req: true, opts: mesi.map((m) => [m, meseCap(m)]) }], values: { mese: meseOggi() }, onSave: (v) => {
+    const mm = v.mese, list = D('fatture').filter((f) => String(f.data || '').slice(0, 7) === mm).sort((a, b) => String(a.data || '').localeCompare(String(b.data || '')) || String(a.numero || '').localeCompare(String(b.numero || '')));
+    if (!list.length) throw { vmsg: 'Nessuna fattura in ' + meseLabel(mm) + '.' };
+    saveXls(primaNotaHtml(list, 'Prima nota fatture — ' + meseCap(mm)), 'prima-nota-' + mm + '.xls');
+  } });
 };
 A.fatImport = () => {
   const dir = S.ftab === 'A' ? 'A' : 'P', inp = document.createElement('input');
