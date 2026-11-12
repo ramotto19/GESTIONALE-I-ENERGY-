@@ -2159,7 +2159,7 @@ A.oreVer = async (d) => {
 function vOre() {
   const m = S.mese || meseOggi(), tab = S.otab || 'riepilogo';
   const tabs = '<div class="tabs" role="tablist">' + [['riepilogo', 'Riepilogo mensile'], ['accessi', 'Accessi']].map((t) => '<button class="tab' + (tab === t[0] ? ' on' : '') + '" data-a="otab" data-t="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
-  if (tab === 'accessi') return pageHead('Ore del personale', 'Collega ogni account a una scheda dipendente: solo così le ore vanno alla persona giusta.', '<button class="btn p" data-a="accNew">Collega account</button>') + tabs + aAccessi();
+  if (tab === 'accessi') return pageHead('Ore del personale', 'Collega ogni account a una scheda dipendente: solo così le ore vanno alla persona giusta.', '<button class="btn" data-a="oreOrfane">Trova ore orfane</button><button class="btn p" data-a="accNew">Collega account</button>') + tabs + aAccessi();
   const rs = righeAcc(m).map((r) => Object.assign(r, { om: oreMese(r.righe, m, dipDiAcc(r.a.id)) })), tot = rs.reduce((t, r) => ({ L: t.L + r.om.lavoro, T: t.T + r.om.tr, A: t.A + r.om.assenze, O: t.O + r.om.ord, S: t.S + r.om.str }), { L: 0, T: 0, A: 0, O: 0, S: 0 });
   const par = OREPAR(), gl = giorniLavMese(m).length;
   const senza = D('dipendenti').filter((d) => d.attivo !== false && !D('accessi').some((a) => a.dipendenteId === d.id));
@@ -2218,6 +2218,32 @@ async function migraOre(fromId, toId) {
   }
   return n;
 }
+/* trova le ore salvate con un'email che non ha più accesso (es. dopo un cambio email fatto rimuovendo
+   e ricreando l'accesso) e permette di riportarle sulla persona giusta. Legge i percorsi ore/<email>/mesi/<m>
+   direttamente da Supabase (solo l'amministratore può farlo). */
+A.oreOrfane = async () => {
+  toast('Cerco le ore non collegate…');
+  let rows = [];
+  try { const sb = await sbClient(); const r = await sb.from('docs').select('path').like('path', 'ore/%'); if (r && r.error) throw r.error; rows = (r && r.data) || []; }
+  catch (e) { toast('Ricerca non riuscita: ' + errMsg(e), 'err'); return; }
+  const cnt = {};
+  rows.forEach((x) => { const mm = String(x.path || '').match(/^ore\/(.+)\/mesi\/[^/]+$/); if (mm) cnt[mm[1]] = (cnt[mm[1]] || 0) + 1; });
+  const attuali = new Set(D('accessi').map((a) => a.id));
+  const orfane = Object.keys(cnt).filter((e) => !attuali.has(e)).sort();
+  if (!orfane.length) { toast('Nessuna ora orfana: tutte le ore registrate sono collegate a un accesso.'); return; }
+  const people = personeReg();
+  if (!people.length) { toast('Collega prima almeno un dipendente a un account, poi potrai assegnargli le ore orfane.'); return; }
+  const opts = people.map((p) => '<option value="' + esc(p.id) + '">' + esc(p.nome) + '</option>').join('');
+  const body = orfane.map((e, i) => '<div class="blk"><div style="flex:1;min-width:0"><b style="word-break:break-all">' + esc(e) + '</b><div class="small muted">' + cnt[e] + (cnt[e] === 1 ? ' mese di ore registrate' : ' mesi di ore registrate') + '</div></div><div class="row" style="gap:6px;flex-wrap:wrap"><select id="orf' + i + '">' + opts + '</select><button type="button" class="btn p sm" data-a="orfMigra" data-e="' + esc(e) + '" data-i="' + i + '">Porta qui</button></div></div>').join('');
+  openModal('<div><h2 class="mt">Ore non collegate a nessun accesso</h2><p class="small muted" style="margin-top:6px">Ore registrate con un indirizzo che non ha più accesso (di solito dopo un cambio email). Scegli la persona a cui appartengono e premi «Porta qui»: le ore vengono spostate sul suo accesso attuale, nulla va perso.</p>' + body + '<div class="row sp" style="margin-top:14px"><button type="button" class="btn" data-a="formCancel">Chiudi</button></div></div>');
+};
+A.orfMigra = async (d) => {
+  const sel = $('#orf' + d.i), to = sel && sel.value; if (!to) return;
+  const nome = nomeAcc(G('accessi', to) || { id: to });
+  if (!(await confirmBox('Portare le ore registrate con ' + d.e + ' sull’accesso di ' + nome + '?', 'Porta qui'))) return;
+  try { const n = await migraOre(d.e, to); closeModal(); toast(n ? 'Ore riportate su ' + nome + ': ' + n + (n === 1 ? ' mese.' : ' mesi.') : 'Nessuna ora trovata su quell’indirizzo.'); S.oreAll = {}; loadAllOre(S.mese || meseOggi()); }
+  catch (e) { toast('Operazione non riuscita: ' + errMsg(e) + ' Nulla è stato perso.', 'err'); }
+};
 A.accCambia = (d) => {
   const old = G('accessi', d.u); if (!old) return; const nome = nomeAcc(old);
   openForm({ title: 'Cambia email di accesso', info: 'Le ore già registrate (e corsi e documenti personali) vengono spostate sul nuovo indirizzo: ' + nome + ' entrerà con la nuova email e non perde niente.', fields: [{ k: 'mail', l: 'Nuova email di accesso', req: true }], values: { mail: '' }, onSave: async (v) => {
