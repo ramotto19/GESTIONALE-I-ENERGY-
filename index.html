@@ -2202,6 +2202,45 @@ A.oreAbilita = async (d) => {
   toast('Fatto: ora ' + nome + ' compare nel registro ore.'); loadAllOre(S.mese || meseOggi());
 };
 /* da registro interno (ore/<id>@interno) ad accesso reale con email: le ore e le approvazioni seguono la persona */
+/* sposta TUTTE le ore (ultimi ~3 anni + mese prossimo) da un identificativo (email o registro interno)
+   a un altro, unendole a quelle eventualmente già presenti sulla destinazione, senza perdere nulla.
+   In caso di stessa giornata vince la riga già presente sulla destinazione. Restituisce quanti mesi ha spostato. */
+async function migraOre(fromId, toId) {
+  let n = 0;
+  for (let k = -36; k <= 1; k++) {
+    const m = addMese(meseOggi(), k);
+    let snap; try { snap = await db.doc('ore/' + fromId + '/mesi/' + m).get(); } catch (e) { continue; }
+    const righe = (snap.exists && snap.data() && snap.data().righe) || []; if (!righe.length) continue;
+    let gia = []; try { const s2 = await db.doc('ore/' + toId + '/mesi/' + m).get(); gia = (s2.exists && s2.data() && s2.data().righe) || []; } catch (e) { gia = []; }
+    const byId = {}; gia.concat(righe).forEach((r) => { if (r && r.id != null && !byId[r.id]) byId[r.id] = r; });
+    await put('ore/' + toId + '/mesi', m, { righe: ordina(Object.keys(byId).map((i) => byId[i])), aggiornato: today() });
+    await db.doc('ore/' + fromId + '/mesi/' + m).delete(); n++;
+  }
+  return n;
+}
+A.accCambia = (d) => {
+  const old = G('accessi', d.u); if (!old) return; const nome = nomeAcc(old);
+  openForm({ title: 'Cambia email di accesso', info: 'Le ore già registrate (e corsi e documenti personali) vengono spostate sul nuovo indirizzo: ' + nome + ' entrerà con la nuova email e non perde niente.', fields: [{ k: 'mail', l: 'Nuova email di accesso', req: true }], values: { mail: '' }, onSave: async (v) => {
+    const mail = String(v.mail || '').trim().toLowerCase();
+    if (!/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(mail)) throw { vmsg: 'Scrivi un indirizzo email valido.' };
+    if (mail === d.u) throw { vmsg: 'È la stessa email di adesso.' };
+    if (G('accessi', mail)) throw { vmsg: 'Questo indirizzo ha già un accesso.' };
+    const n = await migraOre(d.u, mail);
+    await put('accessi', mail, Object.assign({}, old));
+    await remove('accessi', d.u);
+    toast('Email cambiata in ' + mail + (n ? '; ore spostate: ' + n + (n === 1 ? ' mese.' : ' mesi.') : '.')); S.oreAll = {}; loadAllOre(S.mese || meseOggi()); resolveProf();
+  } });
+};
+A.accRecupera = (d) => {
+  const acc = G('accessi', d.u); if (!acc) return; const nome = nomeAcc(acc);
+  openForm({ title: 'Recupera ore da una vecchia email', info: 'Se le ore di ' + nome + ' erano state registrate con un altro indirizzo (es. prima di un cambio email), scrivilo qui: le riporto sul suo accesso attuale (' + d.u + ').', fields: [{ k: 'old', l: 'Vecchia email dove sono le ore', req: true }], values: { old: '' }, onSave: async (v) => {
+    const old = String(v.old || '').trim().toLowerCase();
+    if (!/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(old)) throw { vmsg: 'Scrivi un indirizzo email valido.' };
+    if (old === d.u) throw { vmsg: 'È già l’email attuale.' };
+    const n = await migraOre(old, d.u);
+    toast(n ? 'Ore recuperate: ' + n + (n === 1 ? ' mese.' : ' mesi.') : 'Nessuna ora trovata su quell’indirizzo.'); S.oreAll = {}; loadAllOre(S.mese || meseOggi());
+  } });
+};
 A.orePassa = async (d) => {
   const old = G('accessi', d.u), dip = old && G('dipendenti', old.dipendenteId); if (!old || !dip) return;
   const mail = String(dip.email || '').trim().toLowerCase(), nome = nomeD(dip).trim();
@@ -2248,7 +2287,7 @@ function aAccessi() {
   const em = byEmail(), rows = D('accessi').map((a) => ({ a: a, nome: nomeAcc(a) })).sort(byStr((r) => r.nome));
   const cols = [{ h: em ? 'Persona' : 'Dipendente', f: (r) => '<b>' + esc(r.nome) + '</b>' }, { h: 'Account', f: (r) => esc(S.prof[r.a.id] || r.a.id) }];
   if (em) cols.push({ h: 'Ruolo', f: (r) => (r.a.ruolo === 'admin' ? bd('Amministrazione', 'dark') : bd('Dipendente', 'grey')) });
-  cols.push({ h: '', r: true, f: (r) => (r.a.id === S.uid ? '' : '<button class="btn sm d" data-a="accDel" data-u="' + esc(r.a.id) + '">' + (em ? 'Rimuovi accesso' : 'Scollega') + '</button>') });
+  cols.push({ h: '', r: true, f: (r) => r.a.id === S.uid ? '' : ((em && r.a.ruolo !== 'admin' ? '<button class="btn sm" data-a="accCambia" data-u="' + esc(r.a.id) + '">Cambia email</button><button class="btn sm" data-a="accRecupera" data-u="' + esc(r.a.id) + '">Recupera ore</button>' : '') + '<button class="btn sm d" data-a="accDel" data-u="' + esc(r.a.id) + '">' + (em ? 'Rimuovi accesso' : 'Scollega') + '</button>') });
   return '<section class="card">' + tbl(cols, rows, { empty: 'Nessun account collegato.' }) + '</section>' +
     '<p class="small muted" style="margin-top:12px">' + (em ? 'Può entrare solo chi ha il proprio indirizzo Google in questo elenco (o tra gli amministratori indicati nella configurazione). Gli amministratori vedono e modificano tutto; i dipendenti vedono solo le proprie ore.' : 'Le persone devono avere accesso all\u2019app dal menu di condivisione: con «Can interact» vedono e modificano solo le proprie ore, con «Can edit» sono amministratori e vedono tutto.') + '</p>';
 }
