@@ -1,6 +1,6 @@
 {
-  "name": "Gestionale Impianti",
-  "short_name": "Gestionale",
+  "name": "Gestionale I-Energy",
+  "short_name": "I-Energy",
   "description": "Commesse, planning, personale, azienda e ore lavorate per imprese di impiantistica.",
   "start_url": "./index.html",
   "scope": "./",

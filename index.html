@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Gestionale Impianti</title>
+<title>Gestionale I-Energy</title>
 <link rel="manifest" href="manifest.json?v=2">
 <meta name="theme-color" content="#1B1F23">
 <link rel="icon" href="icons/icon-192-v2.png">
@@ -781,7 +781,7 @@ function shell() {
   if (S.unauthorized) return '<div class="center card"><h2>Accesso non autorizzato</h2><p class="muted">L\u2019account <b>' + esc(S.pendingEmail || '') + '</b> non \u00e8 ancora abilitato. Chiedi all\u2019amministratore di aggiungerti da \u00abOre del personale \u203a Accessi\u00bb, oppure verifica che il backend sia configurato correttamente se sei il primo utente.</p><button class="btn" data-a="signout">Cambia account</button></div>';
   const ready = neededCols().every((c) => S.loaded[c]) || S.late;
   const trouble = S.syncTrouble ? '<div class="alert red" style="margin-bottom:16px">Il backend non risponde da un po’: quello che vedi potrebbe non essere aggiornato. <button class="btn sm" data-a="reload" style="margin-left:8px">Ricarica la pagina</button></div>' : '';
-  return '<div class="app"><nav class="side" aria-label="Principale"><div class="brand"><img src="icons/icon-192-v2.png" alt="I-Energy" class="brandlogo">GESTIONALE<br>IMPIANTI</div>' + navItems().map((n) => '<button class="nv' + (navOn(n[0], n[2]) ? ' on' : '') + '" data-a="go" data-r="' + n[0] + '"' + (n[2] ? ' data-id="' + esc(n[2]) + '"' : '') + '>' + navIcon(n[0]) + '<span>' + esc(n[1]) + '</span></button>').join('') +
+  return '<div class="app"><nav class="side" aria-label="Principale"><div class="brand"><img src="icons/icon-192-v2.png" alt="I-Energy" class="brandlogo">GESTIONALE<br>I-ENERGY</div>' + navItems().map((n) => '<button class="nv' + (navOn(n[0], n[2]) ? ' on' : '') + '" data-a="go" data-r="' + n[0] + '"' + (n[2] ? ' data-id="' + esc(n[2]) + '"' : '') + '>' + navIcon(n[0]) + '<span>' + esc(n[1]) + '</span></button>').join('') +
     '<div class="sidefoot"><div>' + esc(S.me || 'Utente') + ' · ' + (S.admin ? 'Amministratore' : 'Dipendente') + '</div>' + (window.__logout ? '<button data-a="logout">Esci</button>' : '') + (S.admin ? '<button data-a="export">Esporta dati (JSON)</button><button data-a="import">Importa dati (JSON)</button>' : '') + (S.admin && hasDemo() ? '<button data-a="delDemo">Elimina dati di esempio</button>' : '') + '</div></nav><main class="main" id="main">' + trouble + (ready ? view() : '<div class="empty">Caricamento dei dati…</div>') + '</main></div>';
 }
 function view() {
@@ -3521,7 +3521,7 @@ async function loginPassword(signup) {
 function showLogin(err, st) {
   st = st || {}; const el = $('#app'); if (!el) return;
   const mode = st.mode === 'signup' ? 'signup' : 'login';
-  el.innerHTML = '<div class="center card" style="max-width:360px"><img src="icons/icon-192-v2.png" alt="I-Energy" style="display:block;width:72px;height:72px;border-radius:16px;margin:0 auto 12px"><h1 style="font-size:26px">Gestionale Impianti</h1>'
+  el.innerHTML = '<div class="center card" style="max-width:360px"><img src="icons/icon-192-v2.png" alt="I-Energy" style="display:block;width:72px;height:72px;border-radius:16px;margin:0 auto 12px"><h1 style="font-size:26px">Gestionale I-Energy</h1>'
     + '<p class="muted">' + (mode === 'signup' ? 'Imposta la password per il tuo accesso (usa l’email che ti ha indicato l’amministrazione).' : 'Accedi con email e password, oppure con Google.') + '</p>'
     + '<div class="fld"><label for="lemail">Email</label><input id="lemail" type="email" inputmode="email" autocomplete="username" value="' + esc(st.em || '') + '"></div>'
     + '<div class="fld"><label for="lpass">Password</label><input id="lpass" type="password" autocomplete="' + (mode === 'signup' ? 'new-password' : 'current-password') + '"></div>'
