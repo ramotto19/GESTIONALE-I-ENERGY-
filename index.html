@@ -3503,10 +3503,38 @@ async function loginGoogle() {
     if (r && r.error) showLogin('Accesso non riuscito. Riprova.');
   } catch (e) { showLogin(e.message || 'Accesso non riuscito.'); }
 }
-function showLogin(err) {
-  const el = $('#app'); if (!el) return;
-  el.innerHTML = '<div class="center card"><img src="icons/icon-192-v2.png" alt="I-Energy" style="display:block;width:72px;height:72px;border-radius:16px;margin:0 auto 12px"><h1 style="font-size:28px">Gestionale Impianti</h1><p class="muted">Accedi con il tuo account Google per continuare.</p><div id="gsiBtn" style="display:flex;justify-content:center;margin-top:10px"><button type="button" class="btn p" id="gLogin" style="min-height:44px;padding:0 22px">Accedi con Google</button></div>' + (err ? '<p class="err" style="margin-top:10px">' + esc(err) + '</p>' : '') + '</div>';
+const mapAuthErr = (e) => { const m = String((e && e.message) || e || '').toLowerCase(); if (m.includes('invalid login') || m.includes('invalid credentials')) return 'Email o password non corretti.'; if (m.includes('already registered') || m.includes('already been registered') || m.includes('user already')) return 'Questa email ha già un accesso: usa «Ho già la password».'; if (m.includes('not confirmed') || m.includes('confirm')) return 'Account da confermare: contatta l’amministrazione.'; if (m.includes('disabled') || m.includes('not enabled')) return 'L’accesso con email non è ancora attivo. Contatta l’amministrazione.'; if (m.includes('at least') || m.includes('password should')) return 'La password è troppo corta (minimo 8 caratteri).'; return (e && e.message) || 'Accesso non riuscito.'; };
+async function loginPassword(signup) {
+  const em = String(($('#lemail') || {}).value || '').trim().toLowerCase(), pw = ($('#lpass') || {}).value || '';
+  const mode = signup ? 'signup' : '';
+  if (!em || !pw) { showLogin('Inserisci email e password.', { em: em, mode: mode }); return; }
+  if (signup && pw.length < 8) { showLogin('La password deve avere almeno 8 caratteri.', { em: em, mode: 'signup' }); return; }
+  const lb = $('#lBtn'); if (lb) { lb.disabled = true; lb.textContent = 'Attendere…'; }
+  try {
+    const sb = await sbClient();
+    const r = signup ? await sb.auth.signUp({ email: em, password: pw }) : await sb.auth.signInWithPassword({ email: em, password: pw });
+    if (r && r.error) { showLogin(mapAuthErr(r.error), { em: em, mode: mode }); return; }
+    if (signup && (!r.data || !r.data.session)) { showLogin('Password impostata. Ora accedi con email e password.', { em: em }); return; }
+    tryResume();
+  } catch (e) { showLogin(e.message || 'Accesso non riuscito.', { em: em, mode: mode }); }
+}
+function showLogin(err, st) {
+  st = st || {}; const el = $('#app'); if (!el) return;
+  const mode = st.mode === 'signup' ? 'signup' : 'login';
+  el.innerHTML = '<div class="center card" style="max-width:360px"><img src="icons/icon-192-v2.png" alt="I-Energy" style="display:block;width:72px;height:72px;border-radius:16px;margin:0 auto 12px"><h1 style="font-size:26px">Gestionale Impianti</h1>'
+    + '<p class="muted">' + (mode === 'signup' ? 'Imposta la password per il tuo accesso (usa l’email che ti ha indicato l’amministrazione).' : 'Accedi con email e password, oppure con Google.') + '</p>'
+    + '<div class="fld"><label for="lemail">Email</label><input id="lemail" type="email" inputmode="email" autocomplete="username" value="' + esc(st.em || '') + '"></div>'
+    + '<div class="fld"><label for="lpass">Password</label><input id="lpass" type="password" autocomplete="' + (mode === 'signup' ? 'new-password' : 'current-password') + '"></div>'
+    + '<button type="button" class="btn p" id="lBtn" style="width:100%;min-height:44px">' + (mode === 'signup' ? 'Crea password e accedi' : 'Accedi') + '</button>'
+    + (err ? '<p class="err" style="margin-top:10px">' + esc(err) + '</p>' : '')
+    + '<p class="small" style="margin-top:10px">' + (mode === 'signup' ? '<button class="lnk" id="toLogin">Ho già la password</button>' : 'Prima volta? <button class="lnk" id="toSignup">Imposta la password</button>') + '</p>'
+    + '<div style="border-top:1px solid #e3e3e3;margin:14px 0"></div>'
+    + '<button type="button" class="btn" id="gLogin" style="width:100%;min-height:44px">Accedi con Google</button></div>';
   const b = $('#gLogin'); if (b) b.onclick = loginGoogle;
+  const lb = $('#lBtn'); if (lb) lb.onclick = () => loginPassword(mode === 'signup');
+  const ts = $('#toSignup'); if (ts) ts.onclick = () => showLogin('', { em: String(($('#lemail') || {}).value || ''), mode: 'signup' });
+  const tl = $('#toLogin'); if (tl) tl.onclick = () => showLogin('', { em: String(($('#lemail') || {}).value || '') });
+  ['lemail', 'lpass'].forEach((id) => { const n = $('#' + id); if (n) n.onkeydown = (e) => { if (e.key === 'Enter') loginPassword(mode === 'signup'); }; });
 }
 /* un problema temporaneo (rete assente, risposta non pronta) non deve buttare via una sessione valida: si riprova qualche volta */
 async function whoamiResilient() {
