@@ -3706,6 +3706,25 @@ async function importaFatture(files, dir) {
   }
   toast('Fatture importate: ' + st.n + (st.auto ? ' (' + st.auto + ' collegate a una commessa)' : '') + (st.dup ? ' · già presenti: ' + st.dup : '') + (st.err ? ' · non lette: ' + st.err : '') + (st.noFile ? ' · file non caricato su Drive: ' + st.noFile : ''), st.err || st.noFile ? 'err' : '');
 }
+/* esportazione "Prima nota" per la commercialista: tutte le fatture (passive e attive) in ordine di data,
+   con imponibile/IVA/totale come NUMERI (sommabili in Excel), entrate/uscite separate, stato e scadenze. */
+const pnCellT = (v) => '<td style="mso-number-format:\'\\@\'">' + esc(v == null ? '' : v) + '</td>';
+const pnCellN = (v) => '<td style="mso-number-format:\'0.00\'">' + (Math.round((Number(v) || 0) * 100) / 100) + '</td>';
+function primaNotaHtml(list, titolo) {
+  const H = ['Data', 'Tipo', 'Numero', 'Controparte', 'P.IVA', 'Imponibile', 'IVA', 'Totale', 'Entrate', 'Uscite', 'Scadenza', 'Stato', 'Data incasso/pagamento', 'Commessa', 'Descrizione'];
+  const head = '<tr style="font-weight:bold;background:#eeeeee">' + H.map((h) => '<th>' + esc(h) + '</th>').join('') + '</tr>';
+  const stato = (f) => f.pagata ? (f.dir === 'A' ? 'Incassata' : 'Pagata') : (f.scadenza && f.scadenza < today() ? 'Scaduta' : (f.dir === 'A' ? 'Da incassare' : 'Da pagare'));
+  const comL = (f) => { const c = f.commessaId && G('commesse', f.commessaId); return c ? commessaLabel(c) : (f.generale ? 'Spesa generale' : ''); };
+  const rows = list.map((f) => '<tr>' + [pnCellT(fmtD(f.data)), pnCellT(f.dir === 'A' ? 'Attiva (cliente)' : 'Passiva (fornitore)'), pnCellT(f.numero), pnCellT(f.controparte), pnCellT(f.piva), pnCellN(f.imponibile), pnCellN(f.iva), pnCellN(f.tot), pnCellN(f.dir === 'A' ? f.tot : 0), pnCellN(f.dir === 'A' ? 0 : f.tot), pnCellT(fmtD(f.scadenza)), pnCellT(stato(f)), pnCellT(fmtD(f.dataPagamento)), pnCellT(comL(f)), pnCellT(f.descrizione)].join('') + '</tr>').join('');
+  const SB = (d, k) => sum(list.filter((f) => f.dir === d), (f) => f[k] || 0), SA = (k) => SB('A', k) + SB('P', k);
+  const tot = '<tr style="font-weight:bold;background:#eeeeee">' + [pnCellT('TOTALE'), pnCellT(''), pnCellT(''), pnCellT(''), pnCellT(''), pnCellN(SA('imponibile')), pnCellN(SA('iva')), pnCellN(SA('tot')), pnCellN(SB('A', 'tot')), pnCellN(SB('P', 'tot')), pnCellT(''), pnCellT(''), pnCellT(''), pnCellT(''), pnCellT('')].join('') + '</tr>';
+  return '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + head + rows + tot + '</table>';
+}
+A.fatPrimaNota = () => {
+  const list = D('fatture').slice().sort((a, b) => String(a.data || '').localeCompare(String(b.data || '')) || String(a.numero || '').localeCompare(String(b.numero || '')));
+  if (!list.length) { toast('Nessuna fattura da esportare.'); return; }
+  saveXls(primaNotaHtml(list, 'Prima nota fatture — ' + fmtD(today())), 'prima-nota-fatture.xls');
+};
 A.fatImport = () => {
   const dir = S.ftab === 'A' ? 'A' : 'P', inp = document.createElement('input');
   inp.type = 'file'; inp.multiple = true; inp.accept = '.xml,.p7m,.zip';
@@ -3731,7 +3750,7 @@ function vFatture() {
   const nfP = (n) => n + (n === 1 ? ' fattura passiva' : ' fatture passive'), nfA = (n) => n + (n === 1 ? ' fattura attiva' : ' fatture attive');
   const rip = '<div class="grid g4" style="margin-bottom:16px">' + kpi('Da pagare', eur2(sPD('P', false)), nfP(nPD('P', false))) + kpi('Pagate', eur2(sPD('P', true)), nfP(nPD('P', true))) + kpi('Da incassare', eur2(sPD('A', false)), nfA(nPD('A', false))) + kpi('Incassate', eur2(sPD('A', true)), nfA(nPD('A', true))) + '</div>';
   const tabs = '<div class="tabs" role="tablist">' + [['P', 'Passive (fornitori)'], ['A', 'Attive (clienti)']].map((x) => '<button class="tab' + (dir === x[0] ? ' on' : '') + '" data-a="ftab" data-t="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
-  return pageHead('Fatture', 'Fatture elettroniche passive e attive, divise per mese. Le passive collegate a una commessa entrano nei suoi costi; le scadenze compaiono nel calendario.', '<button class="btn" data-a="fatNew">+ Fattura manuale</button><button class="btn p" data-a="fatImport">Importa XML o ZIP</button>') + rip + tabs +
+  return pageHead('Fatture', 'Fatture elettroniche passive e attive, divise per mese. Le passive collegate a una commessa entrano nei suoi costi; le scadenze compaiono nel calendario.', '<button class="btn" data-a="fatPrimaNota">Prima nota (Excel)</button><button class="btn" data-a="fatNew">+ Fattura manuale</button><button class="btn p" data-a="fatImport">Importa XML o ZIP</button>') + rip + tabs +
     '<div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0 10px">' + chip('tutte', 'Tutte', tutte.length) + chip('aperte', dir === 'P' ? 'Da pagare' : 'Da incassare', aperte.length) + chip('scadute', 'Scadute', scad.length) + chip('senza', 'Da collegare', senza.length) + '<input id="q" data-in="q" placeholder="Cerca fattura" aria-label="Cerca" value="' + esc(S.q) + '" style="margin-left:auto;max-width:240px"></div>' +
     '<section class="card">' + fattMese(rows, dir) + '</section><p class="small muted" style="margin-top:10px">Importazione automatica dal software di fatturazione (DocEasy): in preparazione. Intanto puoi caricare a mano gli XML (anche firmati .p7m o in uno ZIP): ogni fattura già presente non viene duplicata.</p>';
 }
