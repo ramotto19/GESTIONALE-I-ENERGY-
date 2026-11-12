@@ -1851,17 +1851,20 @@ function oreMese(righe, m, dip) {
   const par = OREPAR(), x = oreTot(righe), og = dip && num(dip.oreGiorno) > 0 ? num(dip.oreGiorno) : par.oreGiorno;
   const gl = giorniLavMese(m).length, dovute = Math.round(gl * og * 60), assenze = x.t.F + x.t.P + x.t.M + x.t.A;
   const trRaw = righe.filter((r) => tipoR(r) === 'L').reduce((t, r) => t + (Number(r.tr) || 0), 0), tr = trRaw;
-  /* il sabato lavorato è sempre straordinario: non concorre alle ore ordinarie */
-  const sabR = righe.filter((r) => tipoR(r) === 'L' && r.d && parseD(r.d).getDay() === 6);
-  const sab = sabR.reduce((t, r) => t + minRiga(r), 0);
-  const lavoro = x.t.L, comput = lavoro, compOrd = comput - sab, daLavorare = Math.max(0, dovute - assenze);
-  return { gl, og, dovute, assenze, lavoro, trRaw, tr, perc: par.tragitto, comput, sab, daLavorare, ord: Math.min(compOrd, daLavorare), str: Math.max(0, compOrd - daLavorare) + sab, manc: Math.max(0, daLavorare - compOrd), giorni: x.giorni };
+  /* regola: ogni giorno feriale le prime "ore al giorno" (8 h) sono ordinarie, il resto è straordinario;
+     sabato, domenica e festivi lavorati sono interamente straordinario. */
+  const soglia = Math.round(og * 60), fe = festiviDi(+m.slice(0, 4)), perDay = {};
+  righe.forEach((r) => { if (tipoR(r) !== 'L' || !r.d) return; perDay[r.d] = (perDay[r.d] || 0) + minRiga(r); });
+  let ord = 0, str = 0, sab = 0;
+  Object.keys(perDay).forEach((d) => { const w = perDay[d], wd = parseD(d).getDay(); if (wd === 6) sab += w; if (wd === 0 || wd === 6 || fe.has(d)) { str += w; } else { const o = Math.min(w, soglia); ord += o; str += w - o; } });
+  const lavoro = x.t.L, daLavorare = Math.max(0, dovute - assenze), manc = Math.max(0, daLavorare - ord);
+  return { gl, og, dovute, assenze, lavoro, trRaw, tr, perc: par.tragitto, sab, daLavorare, ord, str, manc, giorni: x.giorni };
 }
 const dipDiAcc = (u) => { const a = G('accessi', u); return a && a.dipendenteId ? G('dipendenti', a.dipendenteId) : null; };
 const oreCsvCalc = (r, m) => { const o = oreMese(r.righe, m, dipDiAcc(r.a.id)); return [decOre(o.dovute), decOre(o.trRaw), decOre(o.tr), decOre(o.ord), decOre(o.str), decOre(o.sab)]; };
 const kpiMese = (u, m, righe) => {
   const o = oreMese(righe, m, dipDiAcc(u)), fin = m < meseOggi();
-  return '<section class="card" style="margin-bottom:16px"><h2>Riepilogo del mese · ' + esc(meseLabel(m)) + '</h2><div class="grid g4" style="margin-bottom:10px">' + kpi('Ore dovute', fmtMin(o.dovute), o.gl + ' giorni lavorativi × ' + decOre(o.og * 60) + ' h') + kpi('Ore ordinarie', fmtMin(o.ord), o.assenze ? 'Assenze: ' + fmtMin(o.assenze) : 'Ore lavorate fino al dovuto') + kpi('Straordinari', fmtMin(o.str), 'Ore lavorate − ore dovute') + kpi('Tragitto', fmtMin(o.tr), 'Già compreso nelle ore lavorate') + '</div><p class="small muted" style="margin:0">Ore dovute = giorni lavorativi del mese (senza sabato, domenica e festivi) × ore al giorno. Straordinari = ore lavorate − ore dovute (il tragitto è già compreso tra ingresso e uscita, quindi nelle ore lavorate). ' + (fin && o.manc ? 'Ore mancanti rispetto al dovuto: <b>' + fmtMin(o.manc) + '</b>.' : '') + '</p></section>';
+  return '<section class="card" style="margin-bottom:16px"><h2>Riepilogo del mese · ' + esc(meseLabel(m)) + '</h2><div class="grid g4" style="margin-bottom:10px">' + kpi('Ore dovute', fmtMin(o.dovute), o.gl + ' giorni lavorativi × ' + decOre(o.og * 60) + ' h') + kpi('Ore ordinarie', fmtMin(o.ord), 'Fino a ' + decOre(o.og * 60) + ' h al giorno') + kpi('Straordinari', fmtMin(o.str), 'Oltre ' + decOre(o.og * 60) + ' h al giorno, sabato incluso') + kpi('Tragitto', fmtMin(o.tr), 'Già compreso nelle ore lavorate') + '</div><p class="small muted" style="margin:0">Ogni giorno feriale le prime ' + decOre(o.og * 60) + ' ore sono ordinarie, le ore in più sono straordinario; sabato, domenica e festivi lavorati sono tutto straordinario (il tragitto è già compreso nelle ore lavorate). ' + (fin && o.manc ? 'Ore mancanti rispetto al dovuto: <b>' + fmtMin(o.manc) + '</b>.' : '') + '</p></section>';
 };
 /* Ogni riga può avere più conteggi EOLO insieme (r.eo = {M,A,G,K}), per registrare ad
    esempio più attivazioni e un guasto nella stessa giornata senza dover spezzare gli
@@ -2161,12 +2164,12 @@ function vOre() {
   const senza = D('dipendenti').filter((d) => d.attivo !== false && !D('accessi').some((a) => a.dipendenteId === d.id));
   const act = '<button class="btn p" data-a="oreDettXls">Dettaglio per persona (Excel)</button><button class="btn p" data-a="oreDettPdf">Dettaglio per persona (PDF)</button><button class="btn" data-a="oreXls">Riepilogo Excel</button><button class="btn" data-a="orePrint">Riepilogo PDF</button><button class="btn" data-a="oreCsv" data-k="riep">Riepilogo CSV</button><button class="btn" data-a="oreCsv" data-k="det">Dettaglio per persona (CSV)</button>';
   let h = pageHead('Ore del personale', 'Totali del mese per persona, pronti per paghe e amministrazione. Tocca una riga per aprire il registro di quella persona.', act) + tabs + '<div class="row sp" style="margin-bottom:14px">' + meseNav('omese') + '<span class="row"><button class="btn" data-a="oreRefresh">' + (S.oreLoading ? 'Aggiorno…' : 'Aggiorna') + '</button><button class="btn" data-a="oreApprAll">Approva tutti</button></span></div>';
-  h += '<div class="alert green" style="margin-bottom:12px"><b>' + esc(meseLabel(m)) + ':</b> ' + gl + ' giorni lavorativi × ' + decOre(par.oreGiorno * 60) + ' ore = <b>' + fmtMin(Math.round(gl * par.oreGiorno * 60)) + '</b> ore dovute (festivi esclusi). Straordinari = ore lavorate − ore dovute (il sabato lavorato è tutto straordinario); il tragitto è già compreso nelle ore lavorate e viene solo indicato a parte. Gli straordinari vengono solo conteggiati.</div>';
+  h += '<div class="alert green" style="margin-bottom:12px"><b>' + esc(meseLabel(m)) + ':</b> ' + gl + ' giorni lavorativi × ' + decOre(par.oreGiorno * 60) + ' ore = <b>' + fmtMin(Math.round(gl * par.oreGiorno * 60)) + '</b> ore dovute (festivi esclusi). Ogni giorno feriale le prime ' + decOre(par.oreGiorno * 60) + ' ore sono ordinarie, le ore in più sono straordinario; sabato, domenica e festivi lavorati sono tutto straordinario. Il tragitto è già compreso nelle ore lavorate e viene solo indicato a parte; gli straordinari vengono solo conteggiati.</div>';
   h += '<section class="card">' + (rs.length ? '<div class="scroll"><table class="tbl"><thead><tr><th>Persona</th><th class="r">Giorni</th><th class="r">Ore lavorate</th><th class="r">Tragitto</th><th class="r">Assenze</th><th class="r">Ordinarie</th><th class="r">Straordinari</th><th>Interventi EOLO</th><th>Stato</th><th></th></tr></thead><tbody>' +
     rs.map((r) => '<tr class="clk" data-a="orePers" data-u="' + esc(r.a.id) + '"><td><b>' + esc(r.nome) + '</b>' + (r.om.manc && m < meseOggi() ? '<div class="small" style="color:#b45309">Mancano ' + fmtMin(r.om.manc) + '</div>' : '') + '</td><td class="r">' + r.om.giorni + '</td><td class="r"><b>' + fmtMin(r.om.lavoro) + '</b></td><td class="r">' + fmtMin(r.om.tr) + '</td><td class="r">' + fmtMin(r.om.assenze) + '</td><td class="r">' + fmtMin(r.om.ord) + '</td><td class="r"><b>' + fmtMin(r.om.str) + '</b></td><td class="small">' + (r.eo.tot ? esc(eoloTxt(r.eo)) : '<span class="muted">—</span>') + '</td><td>' + bd(r.st.t, r.st.c) + '</td><td class="r">' + (r.st.k === 'ok' ? '<button class="btn sm" data-a="oreRiapri" data-u="' + esc(r.a.id) + '">Riapri</button>' : r.righe.length ? '<button class="btn sm" data-a="oreAppr" data-u="' + esc(r.a.id) + '">Approva</button>' : '') + '</td></tr>').join('') +
     '<tr><td><b>Totale</b></td><td></td><td class="r"><b>' + fmtMin(tot.L) + '</b></td><td class="r">' + fmtMin(tot.T) + '</td><td class="r">' + fmtMin(tot.A) + '</td><td class="r">' + fmtMin(tot.O) + '</td><td class="r"><b>' + fmtMin(tot.S) + '</b></td><td class="small">' + esc(eoloTxt(rs.reduce((t, r) => ({ M: t.M + r.eo.M, A: t.A + r.eo.A, G: t.G + r.eo.G, K: t.K + r.eo.K }), { M: 0, A: 0, G: 0, K: 0 }))) + '</td><td></td><td></td></tr></tbody></table></div>' : '<div class="empty">Nessun account collegato. Apri la scheda Accessi per collegare i dipendenti.</div>') + '</section>';
   h += cardCtrl(m);
-  h += '<p class="small muted" style="margin-top:12px">Straordinari = ore lavorate − ore dovute (ridotte da ferie, permessi e malattia); il tragitto è già compreso nelle ore lavorate e viene solo indicato a parte. <button class="lnk" data-a="oreParam">Parametri del calcolo</button></p>';
+  h += '<p class="small muted" style="margin-top:12px">Ordinarie = fino a ' + decOre(par.oreGiorno * 60) + ' ore al giorno; le ore in più e tutto il sabato/domenica/festivi sono straordinario. Il tragitto è già compreso nelle ore lavorate e viene solo indicato a parte. <button class="lnk" data-a="oreParam">Parametri del calcolo</button></p>';
   const daAprire = D('dipendenti').filter((d) => d.attivo !== false && G('accessi', d.id + '@interno') && /^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(String(d.email || '').trim()) && !G('accessi', String(d.email).trim().toLowerCase()));
   if (daAprire.length) h += '<section class="card" style="margin-top:14px"><h2>Registro compilato da te: ora hanno un’email</h2>' + daAprire.map((d) => '<div class="blk"><div style="flex:1"><b>' + esc(nomeD(d).trim()) + '</b><div class="small muted">Email ' + esc(d.email) + ': dando l’accesso, le ore che hai già registrato passano nella sua pagina.</div></div><button class="btn sm p" data-a="oreAbilita" data-id="' + esc(d.id) + '">Dai accesso</button></div>').join('') + '</section>';
   const passa = D('accessi').filter((a) => a.interno && a.dipendenteId).map((a) => ({ a, d: G('dipendenti', a.dipendenteId) })).filter((x) => x.d && /^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(String(x.d.email || '').trim()));
@@ -2290,11 +2293,14 @@ A.accDel = async (d) => { if (!(await confirmBox(byEmail() ? 'Togliere l\u2019ac
 const csvCell = (x) => { const s = String(x == null ? '' : x); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 const toCsv = (rows) => '\uFEFF' + rows.map((r) => r.map(csvCell).join(';')).join('\r\n');
 /* riepilogo mensile del personale: stesse righe per CSV, Excel e stampa/PDF (ore in formato hh:mm, con la somma totale in fondo) */
-const KPI_HEAD = ['Ore dovute', 'Ore ordinarie', 'Straordinari', 'Tragitto (compreso nelle ore lavorate)', 'Ore lavorate', 'Giorni di lavoro', 'Ferie', 'Permessi', 'Malattia e altre assenze'];
+const KPI_HEAD = ['Ore dovute', 'Ore ordinarie', 'Straordinari', 'Tragitto', 'Ore lavorate', 'Giorni di lavoro', 'Ferie', 'Permessi', 'Malattia e altre assenze'];
 const kpiVals = (o, x) => [fmtMin(o.dovute), fmtMin(o.ord), fmtMin(o.str), fmtMin(o.tr), fmtMin(o.lavoro), o.giorni, fmtMin(x.t.F), fmtMin(x.t.P), fmtMin(x.t.M + x.t.A)];
 function riepilogoRows(m, rs) {
   /* stesse voci del "Riepilogo del mese" nella pagina di ogni persona */
-  return [['Persona'].concat(KPI_HEAD)].concat(rs.map((r) => [r.nome].concat(kpiVals(oreMese(r.righe, m, dipDiAcc(r.a.id)), r.x))));
+  const rows = rs.map((r) => [r.nome].concat(kpiVals(oreMese(r.righe, m, dipDiAcc(r.a.id)), r.x)));
+  const T = rs.reduce((t, r) => { const o = oreMese(r.righe, m, dipDiAcc(r.a.id)), xt = r.x.t; t.dovute += o.dovute; t.ord += o.ord; t.str += o.str; t.tr += o.tr; t.lavoro += o.lavoro; t.giorni += o.giorni; t.F += xt.F; t.P += xt.P; t.MA += xt.M + xt.A; return t; }, { dovute: 0, ord: 0, str: 0, tr: 0, lavoro: 0, giorni: 0, F: 0, P: 0, MA: 0 });
+  const tot = ['TOTALE', fmtMin(T.dovute), fmtMin(T.ord), fmtMin(T.str), fmtMin(T.tr), fmtMin(T.lavoro), T.giorni, fmtMin(T.F), fmtMin(T.P), fmtMin(T.MA)];
+  return rs.length ? [['Persona'].concat(KPI_HEAD)].concat(rows, [tot]) : [['Persona'].concat(KPI_HEAD)];
 }
 const tabellaHtml = (rows, titolo, bl) => '<h2 style="font-family:Arial">' + esc(titolo) + '</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">' + rows.map((r, i) => '<tr' + (i === 0 || (bl && i === rows.length - 1) ? ' style="font-weight:bold;background:#eeeeee"' : '') + '>' + r.map((c) => '<' + (i === 0 ? 'th' : 'td style="mso-number-format:\'\\@\'"') + '>' + esc(c) + '</' + (i === 0 ? 'th' : 'td') + '>').join('') + '</tr>').join('') + '</table>';
 
@@ -2303,7 +2309,7 @@ function persObj(u, m) { const a = G('accessi', u) || { id: u }, righe = righeOf
 function dettPersona(p, m) {
   const o = oreMese(p.righe, m, dipDiAcc(p.a.id)), par = OREPAR(), manc = m < meseOggi() ? o.manc : 0;
   const sum = [KPI_HEAD, kpiVals(o, p.x)];
-  const day = [['Data', 'Giorno', 'Tipo', 'Ingresso', 'Uscita', 'Pausa (min)', 'Ore lavorate (hh:mm)', 'di cui tragitto (hh:mm)', 'Assenza (hh:mm)', 'Commessa o luogo', 'Attività']];
+  const day = [['Data', 'Giorno', 'Tipo', 'Ingresso', 'Uscita', 'Pausa (min)', 'Ore lavorate (hh:mm)', 'Tragitto (hh:mm)', 'Assenza (hh:mm)', 'Commessa o luogo', 'Attività']];
   ordina(p.righe).forEach((x) => { const L = tipoR(x) === 'L', tr = L ? (Number(x.tr) || 0) : 0; day.push([fmtD(x.d), GG[parseD(x.d).getDay()], lab(TIPI_ORE, tipoR(x)), L ? (x.i || '') : '', L ? (x.u || '') : '', L ? (Number(x.p) || 0) : '', L ? fmtMin(minRiga(x)) : '', L ? fmtMin(tr) : '', L ? '' : fmtMin(minRiga(x)), x.c || '', x.a || '']); });
   day.push(['TOTALE ' + p.nome, '', '', '', '', '', fmtMin(o.lavoro), fmtMin(o.tr), fmtMin(o.assenze), '', '']);
   return { sum: sum, day: day };
@@ -2317,16 +2323,16 @@ A.oreDettPdf = async (d) => { const x = await dettSel(d); if (!x.ps.length) retu
 A.oreXls = async () => {
   const m = S.mese || meseOggi(); await loadAllOre(m, true);
   const rows = riepilogoRows(m, righeAcc(m));
-  const html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>' + tabellaHtml(rows, 'Riepilogo ore del personale · ' + meseLabel(m)) + '</body></html>';
+  const html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>' + tabellaHtml(rows, 'Riepilogo ore del personale · ' + meseLabel(m), true) + '</body></html>';
   const blob = new Blob(['﻿' + html], { type: 'application/vnd.ms-excel;charset=utf-8' }), url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = 'ore-' + m + '-riepilogo.xls'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 4000);
 };
 A.orePrint = async () => {
   const m = S.mese || meseOggi(); await loadAllOre(m, true);
   const rows = riepilogoRows(m, righeAcc(m)), par = OREPAR();
-  const nota = '<p style="font-family:Arial;font-size:11px">Ore dovute = giorni lavorativi del mese × ' + decOre(par.oreGiorno * 60) + ' ore. Straordinari = ore lavorate − ore dovute (il sabato lavorato è tutto straordinario). Il tragitto è già compreso nelle ore lavorate.</p>';
+  const nota = '<p style="font-family:Arial;font-size:11px">Ogni giorno feriale le prime ' + decOre(par.oreGiorno * 60) + ' ore sono ordinarie, le ore in più sono straordinario; sabato, domenica e festivi lavorati sono tutto straordinario. Il tragitto è già compreso nelle ore lavorate.</p>';
   const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'; document.body.appendChild(f);
-  f.srcdoc = '<html><head><meta charset="utf-8"><style>@page{size:A4 landscape;margin:10mm}</style></head><body>' + tabellaHtml(rows, 'Riepilogo ore del personale · ' + meseLabel(m)) + nota + '</body></html>';
+  f.srcdoc = '<html><head><meta charset="utf-8"><style>@page{size:A4 landscape;margin:10mm}</style></head><body>' + tabellaHtml(rows, 'Riepilogo ore del personale · ' + meseLabel(m), true) + nota + '</body></html>';
   f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast('Stampa non riuscita.', 'err'); } setTimeout(() => f.remove(), 60000); };
 };
 A.oreCsv = async (d) => {
