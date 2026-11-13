@@ -103,8 +103,13 @@ input[type=file]{padding:6px}
 .vc{display:flex;align-items:center;gap:10px;min-height:36px;border-top:1px solid var(--ln2)}
 .vc label{display:flex;align-items:center;gap:10px;cursor:pointer;flex:1}
 .vc.done span{text-decoration:line-through;color:var(--mu)}
-.ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .ov.top{z-index:60;align-items:center}
+/* mentre un modale è aperto blocchiamo lo scorrimento della pagina dietro: su telefono, scorrendo un
+   form lungo, lo sfondo scorreva insieme e i suoi contenuti trasparivano sopra i campi (sembravano
+   sovrapposti). Il body viene fissato e ripristinato alla chiusura. */
+html.modal-open{overflow:hidden}
+body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 .mod{background:var(--pn);border:1px solid var(--ln);border-radius:12px;width:100%;max-width:560px;padding:22px;display:flex;flex-direction:column;gap:14px}
 .mod.wide{max-width:820px}.mod.sm{max-width:420px}
 .mod .mt{margin-bottom:2px}
@@ -259,15 +264,21 @@ function go(route, id, tab) { if (route === 'mezzo') S.mtab = 'pano'; S.route = 
 
 /* ---------- finestre e form ---------- */
 let FORM = null;
-function openModal(html, wide) { $('#modal').innerHTML = '<div class="ov"><div class="mod' + (wide ? ' wide' : '') + '" role="dialog" aria-modal="true">' + html + '</div></div>'; const f = $('#modal input:not([type=hidden]):not([type=checkbox]),#modal select,#modal textarea'); if (f) f.focus(); }
-function closeModal() { const m = $('#modal'); if (m) m.innerHTML = ''; FORM = null; }
+/* blocco dello scroll di sfondo, con conteggio perché i modali si possono sovrapporre (es. una
+   conferma sopra un form): si sblocca solo quando l'ultimo è chiuso, ripristinando la posizione. */
+let scrollLocks = 0, savedScrollY = 0;
+function lockScroll() { if (scrollLocks === 0) { savedScrollY = window.scrollY || window.pageYOffset || 0; document.body.style.top = (-savedScrollY) + 'px'; document.documentElement.classList.add('modal-open'); document.body.classList.add('modal-open'); } scrollLocks++; }
+function unlockScroll() { if (scrollLocks === 0) return; scrollLocks--; if (scrollLocks === 0) { document.documentElement.classList.remove('modal-open'); document.body.classList.remove('modal-open'); document.body.style.top = ''; window.scrollTo(0, savedScrollY); } }
+function openModal(html, wide) { $('#modal').innerHTML = '<div class="ov"><div class="mod' + (wide ? ' wide' : '') + '" role="dialog" aria-modal="true">' + html + '</div></div>'; lockScroll(); const f = $('#modal input:not([type=hidden]):not([type=checkbox]),#modal select,#modal textarea'); if (f) f.focus(); }
+function closeModal() { const m = $('#modal'); const had = m && m.innerHTML; if (m) m.innerHTML = ''; FORM = null; if (had) unlockScroll(); }
 function toast(msg, kind) { const t = $('#toast'); if (!t) return; t.textContent = msg; t.className = 'toast show ' + (kind || ''); clearTimeout(toast.t); toast.t = setTimeout(() => { t.className = 'toast'; }, 3500); }
 function confirmBox(msg, label) {
   return new Promise((res) => {
     const el = $('#dlg');
     el.innerHTML = '<div class="ov top"><div class="mod sm" role="alertdialog"><p style="margin:0">' + esc(msg) + '</p><div class="row end"><button class="btn" id="dlgNo">Annulla</button><button class="btn p" id="dlgYes">' + esc(label || 'Conferma') + '</button></div></div></div>';
-    $('#dlgNo').onclick = () => { el.innerHTML = ''; res(false); };
-    $('#dlgYes').onclick = () => { el.innerHTML = ''; res(true); };
+    lockScroll();
+    $('#dlgNo').onclick = () => { el.innerHTML = ''; unlockScroll(); res(false); };
+    $('#dlgYes').onclick = () => { el.innerHTML = ''; unlockScroll(); res(true); };
     $('#dlgYes').focus();
   });
 }
