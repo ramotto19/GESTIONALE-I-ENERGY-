@@ -388,6 +388,7 @@ function editSub(o) {
       doc2[o.key] = arr2;
       applyLocalWrite(o.col, o.id, doc2);
       await patch(o.col, o.id, { [o.key]: arr2 });
+      if (o.after) setTimeout(o.after, 0);
     },
     onDelete: isNew ? null : async () => {
       const doc2 = clone(G(o.col, o.id)), arr2 = doc2[o.key] || [];
@@ -395,6 +396,7 @@ function editSub(o) {
       doc2[o.key] = arr2;
       applyLocalWrite(o.col, o.id, doc2);
       await patch(o.col, o.id, { [o.key]: arr2 });
+      if (o.after) setTimeout(o.after, 0);
     }
   });
 }
@@ -704,7 +706,7 @@ function eventi() {
   });
   D('docAzienda').filter((x) => !x.archiviato).forEach((x) => push(x.dataScadenza, 'AZIENDA', x.titolo || lab(TIPI_DOC_AZ, x.tipo), x.ente || '', { r: 'azienda', tab: 'documenti' }));
   D('assicurazioni').filter((x) => !x.archiviato).forEach((x) => push(x.dataScadenza, 'ASSICURAZIONE', lab(TIPI_ASS, x.tipo), x.compagnia || '', { r: 'azienda', tab: 'assicurazioni' }));
-  D('fatture').filter((f) => !f.pagata && f.scadenza).forEach((f) => push(f.scadenza, 'FATTURA', (f.dir === 'P' ? 'Da pagare: ' : 'Da incassare: ') + (f.controparte || '') + ' · ' + eur2(f.tot), 'Fattura ' + (f.numero || ''), { r: 'fatture', tab: f.dir }));
+  D('fatture').filter((f) => !fatSaldata(f) && f.scadenza).forEach((f) => push(f.scadenza, 'FATTURA', (f.dir === 'P' ? 'Da pagare: ' : 'Da incassare: ') + (f.controparte || '') + ' · ' + eur2(residuoFat(f)), 'Fattura ' + (f.numero || ''), { r: 'fatture', tab: f.dir }));
   D('mezzi').filter((m) => m.attivo !== false).forEach((m) => {
     /* revisione e bollo arrivano già da qui sotto (sono due dei tipi di controllo), presi
        dall'ultimo controllo di quel tipo caricato: niente più campo scadenza separato da tenere
@@ -3815,7 +3817,21 @@ async function tryResume() {
    importata (stessa controparte, numero e data) non si duplica. importaFatture() è lo stesso punto
    di ingresso che userà l'importazione automatica. */
 const eur2 = (n) => '€\u00a0' + (Number(n) || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fatStato = (f) => (f.pagata ? bd(f.dir === 'P' ? 'Pagata' : 'Incassata', 'green') : f.scadenza && f.scadenza < today() ? bd('Scaduta', 'red') : bd(f.dir === 'P' ? 'Da pagare' : 'Da incassare', 'amber'));
+const accTot = (f) => (f.acconti || []).reduce((s, a) => s + num(a.importo), 0);
+const residuoFat = (f) => Math.max(0, r2(num(f.tot) - accTot(f)));
+const fatSaldata = (f) => !!f.pagata || (num(f.tot) > 0 && accTot(f) >= num(f.tot) - 0.005);
+const fatStato = (f) => (fatSaldata(f) ? bd(f.dir === 'P' ? 'Pagata' : 'Incassata', 'green') : accTot(f) > 0 ? bd('Parziale · residuo ' + eur2(residuoFat(f)), 'amber') : f.scadenza && f.scadenza < today() ? bd('Scaduta', 'red') : bd(f.dir === 'P' ? 'Da pagare' : 'Da incassare', 'amber'));
+const accFields = () => [{ k: 'data', l: 'Data', t: 'date', req: true, half: true }, { k: 'importo', l: 'Importo acconto (€)', t: 'number', req: true, half: true }, { k: 'modalita', l: 'Modalità', t: 'select', half: true, opts: MODALITA }, { k: 'note', l: 'Note', half: true }];
+function accontiModal(id) {
+  const f = G('fatture', id); if (!f) return;
+  const rows = (f.acconti || []).map((a, i) => '<div class="blk" style="justify-content:space-between;align-items:center"><div style="min-width:0"><b>' + eur2(a.importo) + '</b> <span class="small muted">' + esc(fmtD(a.data)) + (a.modalita ? ' · ' + esc(lab(MODALITA, a.modalita)) : '') + (a.note ? ' · ' + esc(a.note) : '') + '</span></div><div class="row" style="gap:6px"><button class="btn sm" data-a="fatAccEdit" data-id="' + esc(id) + '" data-i="' + i + '">Modifica</button></div></div>').join('') || '<div class="empty" style="margin:6px 0">Nessun acconto registrato.</div>';
+  const riga = (l, v) => '<div class="blk" style="justify-content:space-between"><span>' + l + '</span><b>' + eur2(v) + '</b></div>';
+  openModal('<h2 style="margin-top:0">Acconti · ' + esc(f.controparte || '') + '</h2>' + riga('Totale fattura', f.tot) + riga(f.dir === 'P' ? 'Già pagato' : 'Già incassato', accTot(f)) + riga('Residuo', residuoFat(f)) + '<div style="margin:10px 0">' + rows + '</div><div class="row end"><button class="btn" data-a="close">Chiudi</button><button class="btn p" data-a="fatAccNew" data-id="' + esc(id) + '">+ Acconto</button></div>');
+}
+A.fatAcconti = (d) => accontiModal(d.id);
+A.fatAccNew = (d) => { const id = d.id, f = G('fatture', id); if (!f) return; editSub({ col: 'fatture', id: id, key: 'acconti', title: f.dir === 'P' ? 'Acconto pagato' : 'Acconto incassato', info: 'Totale ' + eur2(f.tot) + ' · residuo ' + eur2(residuoFat(f)), fields: accFields(), defaults: { data: today() }, after: () => accontiModal(id) }); };
+A.fatAccEdit = (d) => { const id = d.id; editSub({ col: 'fatture', id: id, key: 'acconti', i: d.i, title: 'Acconto', fields: accFields(), after: () => accontiModal(id) }); };
+if (!A.close) A.close = () => closeModal();
 const fattPath = (dir, data) => ['Azienda', FOLD_AMM, String(data || today()).slice(0, 4), 'Fatture', dir === 'P' ? 'Passive' : 'Attive'];
 const fattId = (r) => { const k = [r.dir, r.piva, r.numero, r.data].join('|'); return 'f' + hashC(k) + hashC(k.split('').reverse().join('')); };
 const xKids = (n, name) => Array.from(n.children).filter((c) => c.localName === name);
@@ -3915,22 +3931,24 @@ A.fatImport = () => {
 };
 A.ftab = (d) => { S.ftab = d.t; queueRender(); };
 A.ffil = (d) => { S.ffil = d.f; queueRender(); };
-const fatFields = () => [{ k: 'numero', l: 'Numero fattura', req: true, half: true }, { k: 'data', l: 'Data', t: 'date', req: true, half: true }, { k: 'controparte', l: 'Fornitore / cliente', req: true }, { k: 'piva', l: 'P.IVA', half: true }, { k: 'scadenza', l: 'Scadenza pagamento', t: 'date', half: true }, { k: 'imponibile', l: 'Imponibile (€)', t: 'number', half: true }, { k: 'iva', l: 'IVA (€)', t: 'number', half: true }, { k: 'tot', l: 'Totale (€)', t: 'number', req: true, half: true }, { k: 'commessaId', l: 'Commessa', t: 'select', half: true, opts: D('commesse').sort((a, b) => String(b.codice).localeCompare(String(a.codice))).map((c) => [c.id, commessaLabel(c)]) }, { k: 'generale', l: 'Spesa generale (non legata a una commessa)', t: 'checkbox' }, { k: 'pagata', l: 'Già pagata / incassata', t: 'checkbox', half: true }, { k: 'dataPagamento', l: 'Data del pagamento', t: 'date', half: true }, { k: 'descrizione', l: 'Causale / descrizione', t: 'textarea', rows: 2 }, { k: 'note', l: 'Note', t: 'textarea', rows: 2 }, { k: 'file', l: 'File della fattura (XML o PDF)', t: 'file' }];
+const fatFields = () => [{ k: 'numero', l: 'Numero fattura', req: true, half: true }, { k: 'data', l: 'Data', t: 'date', req: true, half: true }, { k: 'controparte', l: 'Fornitore / cliente', req: true }, { k: 'piva', l: 'P.IVA', half: true }, { k: 'scadenza', l: 'Scadenza pagamento', t: 'date', half: true }, { k: 'imponibile', l: 'Imponibile (€)', t: 'number', half: true }, { k: 'iva', l: 'IVA (€)', t: 'number', half: true }, { k: 'tot', l: 'Totale (€)', t: 'number', req: true, half: true }, { k: 'commessaId', l: 'Commessa', t: 'select', half: true, opts: D('commesse').sort((a, b) => String(b.codice).localeCompare(String(a.codice))).map((c) => [c.id, commessaLabel(c)]) }, { k: 'generale', l: 'Spesa generale (non legata a una commessa)', t: 'checkbox' }, { k: 'rate', l: 'Pagamento a rate / acconti', t: 'checkbox', half: true }, { k: 'pagata', l: 'Già saldata del tutto', t: 'checkbox', half: true }, { k: 'dataPagamento', l: 'Data del saldo', t: 'date', half: true }, { k: 'descrizione', l: 'Causale / descrizione', t: 'textarea', rows: 2 }, { k: 'note', l: 'Note', t: 'textarea', rows: 2 }, { k: 'file', l: 'File della fattura (XML o PDF)', t: 'file' }];
 const fatNorm = (v) => { const o = Object.assign({}, v); ['imponibile', 'iva', 'tot'].forEach((k) => { o[k] = Math.round(num(o[k]) * 100) / 100; }); if (!o.tot) o.tot = Math.round((o.imponibile + o.iva) * 100) / 100; if (!o.imponibile && o.tot && !o.iva) o.imponibile = o.tot; if (o.commessaId) o.generale = false; return o; };
 A.fatNew = () => openForm({ title: S.ftab === 'A' ? 'Nuova fattura attiva' : 'Nuova fattura passiva', wide: true, fields: fatFields(), values: { data: today() }, folder: (out) => fattPath(S.ftab === 'A' ? 'A' : 'P', out.data), onSave: (v) => put('fatture', newId('fatture'), Object.assign(fatNorm(v), { dir: S.ftab === 'A' ? 'A' : 'P', importatoIl: today() })) });
 A.fatEdit = (d) => { const x = G('fatture', d.id); if (!x) return; const fields = [{ k: 'dir', l: 'Tipo di fattura', t: 'select', req: true, half: true, opts: [['P', 'Passiva (fornitore)'], ['A', 'Attiva (cliente)']], hint: 'Spostala tra passive e attive se è stata classificata nel modo sbagliato: la scelta viene mantenuta anche dopo la sincronizzazione con DocEasy.' }].concat(fatFields()); openForm({ title: 'Fattura ' + (x.numero || ''), wide: true, fields: fields, values: x, folder: fattPath(x.dir, x.data), onSave: (v) => { const nd = v.dir === 'A' ? 'A' : 'P', o = fatNorm(v); o.dir = nd; if (nd !== x.dir) o.dirFix = true; return patch('fatture', x.id, o); }, onDelete: () => remove('fatture', x.id) }); };
 function vFatture() {
   if (S.tab === 'A' || S.tab === 'P') { S.ftab = S.tab; S.tab = null; }
   const dir = S.ftab === 'A' ? 'A' : 'P', fil = S.ffil || 'tutte', q = String(S.q || '').toLowerCase();
-  const tutte = D('fatture').filter((f) => f.dir === dir), aperte = tutte.filter((f) => !f.pagata), scad = aperte.filter((f) => f.scadenza && f.scadenza < today());
+  const tutte = D('fatture').filter((f) => f.dir === dir), aperte = tutte.filter((f) => !fatSaldata(f)), scad = aperte.filter((f) => f.scadenza && f.scadenza < today());
   const senza = tutte.filter((f) => !f.commessaId && !f.generale);
   const filtri = { tutte: tutte, aperte: aperte, scadute: scad, senza: senza };
   const rows = (filtri[fil] || tutte).filter((f) => !q || ((f.controparte || '') + ' ' + (f.numero || '') + ' ' + (f.descrizione || '')).toLowerCase().includes(q)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
   const chip = (k, t, n) => '<button class="btn sm' + (fil === k ? ' p' : '') + '" data-a="ffil" data-f="' + k + '">' + t + ' (' + n + ')</button>';
   /* riepilogo in alto: stato di pagamento di tutte le fatture, attive e passive */
-  const allF = D('fatture'), sPD = (d, pag) => sum(allF.filter((f) => f.dir === d && !!f.pagata === pag), (f) => f.tot), nPD = (d, pag) => allF.filter((f) => f.dir === d && !!f.pagata === pag).length;
+  /* gli acconti incassati/pagati si sottraggono dal totale: "da pagare/incassare" usa il residuo,
+     "pagate/incassate" somma i saldi completi più gli acconti già versati sulle fatture aperte. */
+  const allF = D('fatture'), openSum = (d) => sum(allF.filter((f) => f.dir === d && !fatSaldata(f)), residuoFat), paidSum = (d) => sum(allF.filter((f) => f.dir === d), (f) => fatSaldata(f) ? num(f.tot) : accTot(f)), openN = (d) => allF.filter((f) => f.dir === d && !fatSaldata(f)).length, paidN = (d) => allF.filter((f) => f.dir === d && fatSaldata(f)).length;
   const nfP = (n) => n + (n === 1 ? ' fattura passiva' : ' fatture passive'), nfA = (n) => n + (n === 1 ? ' fattura attiva' : ' fatture attive');
-  const rip = '<div class="grid g4" style="margin-bottom:16px">' + kpi('Da pagare', eur2(sPD('P', false)), nfP(nPD('P', false))) + kpi('Pagate', eur2(sPD('P', true)), nfP(nPD('P', true))) + kpi('Da incassare', eur2(sPD('A', false)), nfA(nPD('A', false))) + kpi('Incassate', eur2(sPD('A', true)), nfA(nPD('A', true))) + '</div>';
+  const rip = '<div class="grid g4" style="margin-bottom:16px">' + kpi('Da pagare', eur2(openSum('P')), nfP(openN('P'))) + kpi('Pagate', eur2(paidSum('P')), nfP(paidN('P'))) + kpi('Da incassare', eur2(openSum('A')), nfA(openN('A'))) + kpi('Incassate', eur2(paidSum('A')), nfA(paidN('A'))) + '</div>';
   const tabs = '<div class="tabs" role="tablist">' + [['P', 'Passive (fornitori)'], ['A', 'Attive (clienti)']].map((x) => '<button class="tab' + (dir === x[0] ? ' on' : '') + '" data-a="ftab" data-t="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
   return pageHead('Fatture', 'Fatture elettroniche passive e attive, divise per mese. Le passive collegate a una commessa entrano nei suoi costi; le scadenze compaiono nel calendario.', '<button class="btn" data-a="fatPrimaNota">Prima nota (Excel)</button><button class="btn" data-a="fatNew">+ Fattura manuale</button><button class="btn p" data-a="fatImport">Importa XML o ZIP</button>') + rip + tabs +
     '<div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0 10px">' + chip('tutte', 'Tutte', tutte.length) + chip('aperte', dir === 'P' ? 'Da pagare' : 'Da incassare', aperte.length) + chip('scadute', 'Scadute', scad.length) + chip('senza', 'Da collegare', senza.length) + '<input id="q" data-in="q" placeholder="Cerca fattura" aria-label="Cerca" value="' + esc(S.q) + '" style="margin-left:auto;max-width:240px"></div>' +
@@ -3944,7 +3962,7 @@ function fattMese(rows, dir) {
   const mesi = Object.keys(byM).sort((a, b) => b.localeCompare(a));
   const head = '<thead><tr><th>Data</th><th>N.</th><th>' + (dir === 'P' ? 'Fornitore' : 'Cliente') + '</th><th class="r">Imponibile</th><th class="r">IVA</th><th class="r">Totale</th><th>Scadenza</th><th>Commessa</th><th>Stato</th><th>File</th></tr></thead>';
   const comm = (f) => { const c = f.commessaId && G('commesse', f.commessaId); return c ? esc(commessaLabel(c)) : f.generale ? bd('Spesa generale', 'grey') : bd('Da collegare', 'amber'); };
-  const rowH = (f) => '<tr class="clk" data-a="fatEdit" data-id="' + esc(f.id) + '"><td>' + esc(fmtD(f.data)) + '</td><td>' + esc(f.numero) + '</td><td><b>' + esc(f.controparte) + '</b>' + (f.tipoDoc === 'TD04' ? ' ' + bd('Nota di credito', 'grey') : '') + (f.descrizione ? '<div class="small muted">' + esc(String(f.descrizione).slice(0, 80)) + '</div>' : '') + '</td><td class="r">' + eur2(f.imponibile) + '</td><td class="r">' + eur2(f.iva) + '</td><td class="r"><b>' + eur2(f.tot) + '</b></td><td>' + esc(fmtD(f.scadenza)) + '</td><td>' + comm(f) + '</td><td>' + fatStato(f) + '</td><td>' + fileLink(f.file) + '</td></tr>';
+  const rowH = (f) => '<tr class="clk" data-a="fatEdit" data-id="' + esc(f.id) + '"><td>' + esc(fmtD(f.data)) + '</td><td>' + esc(f.numero) + '</td><td><b>' + esc(f.controparte) + '</b>' + (f.tipoDoc === 'TD04' ? ' ' + bd('Nota di credito', 'grey') : '') + (f.descrizione ? '<div class="small muted">' + esc(String(f.descrizione).slice(0, 80)) + '</div>' : '') + '</td><td class="r">' + eur2(f.imponibile) + '</td><td class="r">' + eur2(f.iva) + '</td><td class="r"><b>' + eur2(f.tot) + '</b>' + (accTot(f) > 0 && !fatSaldata(f) ? '<div class="small muted">residuo ' + eur2(residuoFat(f)) + '</div>' : '') + '</td><td>' + esc(fmtD(f.scadenza)) + '</td><td>' + comm(f) + '</td><td>' + fatStato(f) + (f.rate || accTot(f) > 0 ? ' <button class="btn sm" data-a="fatAcconti" data-id="' + esc(f.id) + '">Acconti</button>' : '') + '</td><td>' + fileLink(f.file) + '</td></tr>';
   const body = mesi.map((m) => {
     const list = byM[m].sort((a, b) => String(b.data).localeCompare(String(a.data))), tot = sum(list, (f) => f.tot);
     const lab = m === '—' ? 'Senza data' : (meseLabel(m).charAt(0).toUpperCase() + meseLabel(m).slice(1));
