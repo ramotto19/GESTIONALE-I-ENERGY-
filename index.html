@@ -1607,7 +1607,6 @@ function voceDescr(v) {
   if (v.tipo === 'FV' || v.tipo === 'POMPA') det = n(v.kw) + ' kW';
   else if (v.tipo === 'BATTERIA') det = n(v.kwh) + ' kWh';
   else if (v.tipo === 'VIAGGI') det = n(v.km) + ' km' + ((n(v.viaggi) || 1) > 1 ? ' × ' + n(v.viaggi) + ' viaggi' : '');
-  else if (v.tipo === 'MANODOPERA') det = n(v.persone) + ' persone × ' + (n(v.giorni) + n(v.giorniWe)) + ' giorni';
   return { base: base, det: det };
 }
 function preventivoHtml(c, o) {
@@ -1676,16 +1675,8 @@ function confermaDoc(c, o) { return '<!doctype html><html><head><meta charset="u
 A.prevConferma = async (d) => {
   const c = G('clienti', d.id); if (!c) return; const o = (c.offerte || []).find((x) => x.id === d.x); if (!o) return;
   printHtml(confermaHtml(c, o), true);
-  if (!c.email) { toast('Aggiungi l’email del cliente (scheda cliente) per inviare la conferma.', 'err'); return; }
-  if (!(await confirmBox('Inviare la conferma d’ordine via email a ' + c.email + '?', 'Invia'))) return;
-  const subj = 'Conferma d’ordine n° ' + ((o.preventivo || {}).riferimento || '') + (o.titolo ? ' – ' + o.titolo : ''), bodyText = 'Spett.le ' + c.ragioneSociale + ',\n\nin allegato trova la conferma d’ordine relativa alla nostra offerta.\n\nCordiali saluti,\n' + az().nome;
-  try {
-    await scriptOnce('sendConferma', { to: c.email, subject: subj, body: bodyText, html: confermaDoc(c, o), filename: 'Conferma ordine ' + ((o.preventivo || {}).riferimento || c.ragioneSociale) });
-    toast('Conferma d’ordine inviata a ' + c.email + '.');
-  } catch (e) {
-    toast('Invio automatico non ancora attivo: apro l’email, allega il PDF appena salvato.', 'err');
-    try { location.href = 'mailto:' + encodeURIComponent(c.email) + '?subject=' + encodeURIComponent(subj) + '&body=' + encodeURIComponent(bodyText); } catch (e2) { /* ignora */ }
-  }
+  /* l'invio automatico per email verrà collegato quando sarà configurata l'azione sendConferma nel
+     backend Apps Script (converte l'HTML in PDF e lo invia al cliente). Per ora genera solo il PDF. */
 };
 A.cliAcq = async (d) => { const c = G('clienti', d.id); if (!c) return; const d2 = clone(c); d2.stato = 'ACQUISITO'; applyLocalWrite('clienti', c.id, d2); await patch('clienti', c.id, { stato: 'ACQUISITO' }); toast('Cliente segnato come acquisito: ora puoi creare le sue commesse.'); };
 function vCliente() {
@@ -2605,7 +2596,7 @@ const saveXls = (html, nome) => { const blob = new Blob(['﻿<html xmlns:x="urn:
    pannello a schermo intero dentro l'app, con «Chiudi» e «Stampa / Salva PDF». In stampa nascondiamo
    tutto il resto dell'app e lasciamo solo il contenuto, in A4 orizzontale. */
 let printStyleAdded = false;
-const printHtml = (html) => {
+const printHtml = (html, portrait) => {
   const old = document.getElementById('printOverlay'); if (old) old.remove();
   if (!printStyleAdded) {
     const st = document.createElement('style');
@@ -2618,7 +2609,15 @@ const printHtml = (html) => {
   const chiudi = () => { ov.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = (e) => { if (e.key === 'Escape') chiudi(); };
   ov.querySelector('.pclose').onclick = chiudi;
-  ov.querySelector('.pprint').onclick = () => { try { window.print(); } catch (e) { toast('Stampa non riuscita: usa «Esporta Excel».', 'err'); } };
+  /* la stampa avviene da un iframe isolato: nell'app installata (standalone) window.print() della
+     pagina spesso non apre la stampa, mentre la stampa di un iframe con il solo contenuto è
+     affidabile. L'orientamento (verticale per offerta/conferma) è nel documento dell'iframe. */
+  ov.querySelector('.pprint').onclick = () => {
+    const doc = '<!doctype html><html><head><meta charset="utf-8"><style>@page{size:A4 ' + (portrait ? 'portrait' : 'landscape') + ';margin:' + (portrait ? '12mm' : '10mm') + '}html,body{margin:0}body{font-family:Arial,Helvetica,sans-serif;color:#000}</style></head><body>' + html + '</body></html>';
+    const f = document.createElement('iframe'); f.setAttribute('aria-hidden', 'true'); f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
+    f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast('Stampa non riuscita su questo dispositivo.', 'err'); } setTimeout(() => { try { f.remove(); } catch (e) { /* ignora */ } }, 2000); };
+    document.body.appendChild(f); f.srcdoc = doc;
+  };
   document.addEventListener('keydown', onKey);
 };
 const dettSel = async (d) => { const m = S.mese || meseOggi(); if (d.u) return { m: m, ps: [persObj(d.u, m)] }; await loadAllOre(m, true); return { m: m, ps: righeAcc(m) }; };
