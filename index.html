@@ -1577,7 +1577,8 @@ function vPreventivo() {
   const cond = card('Condizioni', pfld('Riferimento offerta', '<input type="text" data-in="prevTop" data-k="riferimento" value="' + esc(d.riferimento || '') + '" placeholder="es. 2026-11-M01" style="max-width:220px">', true) + pfld('Validità (giorni)', '<input type="number" inputmode="numeric" data-in="prevTop" data-k="validitaGiorni" value="' + esc(d.validitaGiorni != null ? d.validitaGiorni : 30) + '" style="max-width:140px">', true) + pfld('Anticipo all’ordine %', '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="antic" value="' + esc(d.antic != null ? d.antic : '') + '" style="max-width:120px">', true) + pfld('A metà lavori %', '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="meta" value="' + esc(d.meta != null ? d.meta : '') + '" style="max-width:120px">', true) + pfld('Saldo %', '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="saldo" value="' + esc(d.saldo != null ? d.saldo : '') + '" style="max-width:120px">', true) + pfld('Testo introduttivo (in alto nel PDF)', '<textarea data-in="prevTop" data-k="intro" rows="3">' + esc(d.intro || '') + '</textarea>', false) + pfld('Note e condizioni (in fondo al PDF)', '<textarea data-in="prevTop" data-k="note" rows="3" placeholder="Es. Modalità di pagamento, tempi di consegna, esclusioni…">' + esc(d.note || '') + '</textarea>', false));
   const docs = card('Documenti (bollette, progetti…)', ((o.documenti || []).map((dc) => docRow(dc, o)).join('') || '<div class="empty" style="margin:4px 0">Nessun documento allegato.</div>'), '<button class="btn p sm" data-a="prevDocNew" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">+ Documento</button>');
   const actions = '<div class="row" style="flex-wrap:wrap"><button class="btn p" data-a="prevSave" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Salva preventivo</button><button class="btn" data-a="prevPdf" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">PDF offerta</button><button class="btn" data-a="prevConferma" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Conferma d’ordine</button><button class="btn" data-a="listinoParam">Prezzi fissi</button></div>' + (o.commessaId && G('commesse', o.commessaId) ? '<p class="small muted" style="margin-top:8px">Offerta collegata alla commessa ' + esc(G('commesse', o.commessaId).codice) + '.</p>' : '<div class="row" style="margin-top:8px"><button class="btn" data-a="prevAccetta" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Offerta accettata → crea commessa</button></div>');
-  return '<div class="hd"><div><button class="lnk" data-a="goRef" data-r="cliente" data-id="' + esc(c.id) + '">← ' + esc(c.ragioneSociale) + '</button><h1 style="margin-top:8px">Preventivo</h1><p class="sub">' + esc(o.titolo || 'Offerta') + '</p></div></div><div class="stack">' + card('Voci (costi)', rows, '') + card('Aggiungi voce', add) + costi + cli + cond + docs + actions + '</div>';
+  const noteBox = o.note ? '<section class="card" style="background:#fff7e0;border:1px solid #e6cf7a"><div class="small" style="font-weight:700;margin-bottom:4px;color:#8a6d1a">Note dell’offerta</div><div style="white-space:pre-wrap">' + esc(o.note) + '</div></section>' : '';
+  return '<div class="hd"><div><button class="lnk" data-a="goRef" data-r="cliente" data-id="' + esc(c.id) + '">← ' + esc(c.ragioneSociale) + '</button><h1 style="margin-top:8px">Preventivo</h1><p class="sub">' + esc(o.titolo || 'Offerta') + '</p></div></div><div class="stack">' + noteBox + card('Voci (costi)', rows, '') + card('Aggiungi voce', add) + costi + cli + cond + docs + actions + '</div>';
 }
 function prevRecalc() {
   const d = S.prev; if (!d) return;
@@ -1672,11 +1673,38 @@ function confermaHtml(c, o) {
     confArticoliHtml(d, a) + '</div>';
 }
 function confermaDoc(c, o) { return '<!doctype html><html><head><meta charset="utf-8"><style>@page{size:A4 portrait;margin:14mm}body{margin:0}</style></head><body>' + confermaHtml(c, o) + '</body></html>'; }
-A.prevConferma = async (d) => {
+/* "Conferma d'ordine": apre l'anteprima della mail al cliente (destinatario, oggetto e messaggio
+   modificabili), con anteprima/salvataggio del PDF e invio. L'invio automatico passa dall'azione
+   Apps Script sendConferma (converte l'HTML in PDF e lo allega); finché non è configurata, "Invia"
+   apre l'app email già compilata, così alleghi il PDF salvato e invii. */
+function confMailBody(c, o) {
+  const rif = (o.preventivo || {}).riferimento || '';
+  return { to: c.email || '', sub: 'Conferma d’ordine n° ' + rif + (o.titolo ? ' – ' + o.titolo : ''), body: 'Spett.le ' + c.ragioneSociale + ',\n\nin allegato trova la conferma d’ordine relativa alla nostra offerta' + (rif ? ' n° ' + rif : '') + '.\nRestiamo a disposizione per qualsiasi chiarimento.\n\nCordiali saluti,\n' + az().nome };
+}
+A.prevConferma = (d) => {
   const c = G('clienti', d.id); if (!c) return; const o = (c.offerte || []).find((x) => x.id === d.x); if (!o) return;
-  printHtml(confermaHtml(c, o), true);
-  /* l'invio automatico per email verrà collegato quando sarà configurata l'azione sendConferma nel
-     backend Apps Script (converte l'HTML in PDF e lo invia al cliente). Per ora genera solo il PDF. */
+  const m = confMailBody(c, o);
+  openModal('<h2 style="margin-top:0">Conferma d’ordine — invia al cliente</h2>' +
+    (m.to ? '' : '<p class="small" style="color:#b00000;margin-top:0">Questo cliente non ha un’email: aggiungila nella scheda cliente per inviarla.</p>') +
+    '<div class="fld"><label>A (email cliente)</label><input id="cm_to" type="email" value="' + esc(m.to) + '" placeholder="email@cliente.it"></div>' +
+    '<div class="fld"><label>Oggetto</label><input id="cm_sub" value="' + esc(m.sub) + '"></div>' +
+    '<div class="fld"><label>Messaggio</label><textarea id="cm_body" rows="6">' + esc(m.body) + '</textarea></div>' +
+    '<p class="small muted">Tocca prima “Anteprima / salva PDF” per salvare la conferma, poi “Invia al cliente”.</p>' +
+    '<div class="row" style="flex-wrap:wrap;gap:8px"><button class="btn" data-a="close">Chiudi</button><button class="btn" data-a="prevConfPdf" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Anteprima / salva PDF</button><button class="btn p" data-a="prevConfSend" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Invia al cliente</button></div>', true);
+};
+A.prevConfPdf = (d) => { const c = G('clienti', d.id), o = c && (c.offerte || []).find((x) => x.id === d.x); if (o) printHtml(confermaHtml(c, o), true); };
+A.prevConfSend = async (d) => {
+  const c = G('clienti', d.id), o = c && (c.offerte || []).find((x) => x.id === d.x); if (!o) return;
+  const to = ((document.getElementById('cm_to') || {}).value || '').trim(), sub = (document.getElementById('cm_sub') || {}).value || '', body = (document.getElementById('cm_body') || {}).value || '';
+  if (!to) { toast('Inserisci l’email del cliente.', 'err'); return; }
+  try {
+    await scriptOnce('sendConferma', { to: to, subject: sub, body: body, html: confermaDoc(c, o), filename: 'Conferma ordine ' + ((o.preventivo || {}).riferimento || c.ragioneSociale) });
+    toast('Conferma d’ordine inviata a ' + to + '.'); closeModal();
+  } catch (e) {
+    toast('Apro l’app email: allega il PDF salvato e invia.');
+    closeModal();
+    try { location.href = 'mailto:' + encodeURIComponent(to) + '?subject=' + encodeURIComponent(sub) + '&body=' + encodeURIComponent(body); } catch (e2) { /* ignora */ }
+  }
 };
 A.cliAcq = async (d) => { const c = G('clienti', d.id); if (!c) return; const d2 = clone(c); d2.stato = 'ACQUISITO'; applyLocalWrite('clienti', c.id, d2); await patch('clienti', c.id, { stato: 'ACQUISITO' }); toast('Cliente segnato come acquisito: ora puoi creare le sue commesse.'); };
 function vCliente() {
