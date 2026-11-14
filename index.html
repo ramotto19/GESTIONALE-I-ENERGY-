@@ -1512,6 +1512,40 @@ async function offAccettata(cid, oid) {
     const doc2 = clone(G('clienti', cid)); doc2.offerte = arr; applyLocalWrite('clienti', cid, doc2); await patch('clienti', cid, { offerte: arr });
   });
 }
+/* Assegna un numero (OFF-anno-NNN) alle offerte già esistenti che non ne hanno uno. Le offerte
+   già collegate a una commessa ereditano il codice della commessa; le altre prendono il primo
+   progressivo libero dell'anno della loro data. Gira una sola volta, solo da amministratore. */
+async function migraNumeriOfferte() {
+  const maxByYear = {}, bump = (s) => { const p = serialParts(s); if (p) maxByYear[p[0]] = Math.max(maxByYear[p[0]] || 0, p[1]); };
+  D('commesse').forEach((c) => c && bump(c.codice));
+  D('clienti').forEach((c) => c && (c.offerte || []).forEach((o) => o && bump(o.numero)));
+  const todo = [];
+  D('clienti').forEach((c) => c && (c.offerte || []).forEach((o) => { if (o && !serialParts(o.numero)) todo.push([c.id, o.id, o.data || '', o.commessaId || '']); }));
+  if (!todo.length) return 0;
+  todo.sort((a, b) => String(a[2]).localeCompare(String(b[2])) || String(a[1]).localeCompare(String(b[1])));
+  const assign = {};
+  todo.forEach(([cid, oid, data, commessaId]) => {
+    let serial; const cm = commessaId && G('commesse', commessaId);
+    if (cm && serialParts(cm.codice)) serial = cm.codice;
+    else { const y = (+String(data).slice(0, 4)) || new Date().getFullYear(); maxByYear[y] = (maxByYear[y] || 0) + 1; serial = y + '-' + String(maxByYear[y]).padStart(3, '0'); }
+    (assign[cid] = assign[cid] || {})[oid] = 'OFF-' + serial;
+  });
+  let n = 0;
+  for (const cid of Object.keys(assign)) {
+    const cl = G('clienti', cid); if (!cl) continue;
+    const arr = clone(cl.offerte || []).map((o) => (o && assign[cid][o.id] && !serialParts(o.numero)) ? (n++, Object.assign({}, o, { numero: assign[cid][o.id] })) : o);
+    const doc2 = clone(G('clienti', cid)); doc2.offerte = arr; applyLocalWrite('clienti', cid, doc2);
+    try { await patch('clienti', cid, { offerte: arr }); } catch (e) { /* riprova al prossimo avvio */ }
+  }
+  if (n) { toast('Numerate ' + n + (n === 1 ? ' offerta esistente.' : ' offerte esistenti.')); queueRender(); }
+  return n;
+}
+function scheduleMigraNumeri() {
+  if (window.__migNumDone) return;
+  let tries = 0;
+  const tick = () => { if (window.__migNumDone) return; if (S.admin && S.loaded && S.loaded.clienti) { window.__migNumDone = true; migraNumeriOfferte(); return; } if (++tries < 25) setTimeout(tick, 1000); };
+  setTimeout(tick, 1500);
+}
 A.offNew = (d) => offForm(d.id, null);
 A.offEdit = (d) => offForm(d.id, d.x);
 
@@ -4501,6 +4535,7 @@ async function boot() {
   if (pref && pref.ok) { pollCache = pref.cols || {}; skipFirstPoll = true; saveBootCache(w.email, { admin: S.admin, me: S.me, uid: w.email, cols: pollCache }); }
   startRealtime();
   if (S.admin) COLS.forEach(subscribe); else { S.route = 'mieore'; subscribeUser(); }
+  if (S.admin) scheduleMigraNumeri();
   if (S.uid) watchMio(S.mese);
   /* senza questa guardia (come già per __tokenRefreshTimer sotto), ogni volta che boot() viene
      rieseguito nella stessa scheda se ne aggiungerebbe un altro sopra i precedenti, sempre attivo */
