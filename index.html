@@ -1765,7 +1765,7 @@ function confermaDoc(c, o) { return '<!doctype html><html><head><meta charset="u
    apre l'app email già compilata, così alleghi il PDF salvato e invii. */
 function confMailBody(c, o) {
   const rif = confNum(o), rifOff = offNum(o);
-  return { to: c.email || '', sub: 'Conferma d’ordine n° ' + rif + (o.titolo ? ' – ' + o.titolo : ''), body: 'Spett.le ' + c.ragioneSociale + ',\n\nin allegato trova la conferma d’ordine relativa alla nostra offerta' + (rifOff ? ' n° ' + rifOff : '') + '.\nRestiamo a disposizione per qualsiasi chiarimento.\n\nCordiali saluti,\n' + az().nome };
+  return { to: c.email || '', sub: 'Conferma d’ordine n° ' + rif + (o.titolo ? ' – ' + o.titolo : ''), body: 'Spett.le ' + c.ragioneSociale + ',\n\nin allegato trova la conferma d’ordine relativa alla nostra offerta' + (rifOff ? ' n° ' + rifOff : '') + '.\nRestiamo a disposizione per qualsiasi chiarimento.\n\nCordiali saluti,' };
 }
 A.prevConferma = (d) => {
   const c = G('clienti', d.id); if (!c) return; const o = (c.offerte || []).find((x) => x.id === d.x); if (!o) return;
@@ -1795,7 +1795,7 @@ A.prevConfSend = async (d) => {
 function preventivoDoc(c, o) { return '<!doctype html><html><head><meta charset="utf-8"><style>@page{size:A4 portrait;margin:12mm}body{margin:0}</style></head><body>' + preventivoHtml(c, o) + '</body></html>'; }
 function offMailBody(c, o) {
   const n = offNum(o);
-  return { to: c.email || '', sub: 'Offerta' + (n ? ' n° ' + n : '') + (o.titolo ? ' – ' + o.titolo : '') + ' – ' + az().nome, body: 'Spett.le ' + c.ragioneSociale + ',\n\nin allegato trova la nostra offerta' + (n ? ' n° ' + n : '') + (o.titolo ? ' per ' + o.titolo : '') + '.\nRimaniamo a disposizione per qualsiasi chiarimento e vi ringraziamo per l’attenzione.\n\nCordiali saluti,\n' + az().nome };
+  return { to: c.email || '', sub: 'Offerta' + (n ? ' n° ' + n : '') + (o.titolo ? ' – ' + o.titolo : '') + ' – ' + az().nome, body: 'Spett.le ' + c.ragioneSociale + ',\n\nin allegato trova la nostra offerta' + (n ? ' n° ' + n : '') + (o.titolo ? ' per ' + o.titolo : '') + '.\nRimaniamo a disposizione per qualsiasi chiarimento e vi ringraziamo per l’attenzione.\n\nCordiali saluti,' };
 }
 /* "Invia offerta": stessa logica della conferma d'ordine. L'invio automatico passa dall'azione
    Apps Script sendOfferta (converte l'HTML in PDF e lo allega); finché non è configurata, apre
