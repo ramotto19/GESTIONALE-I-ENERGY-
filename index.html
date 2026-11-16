@@ -1689,7 +1689,7 @@ A.prevOpen = (d) => { const c = G('clienti', d.id); if (!c) return; const o = (c
 function rifAuto() { const now = new Date(), mm = String(now.getMonth() + 1).padStart(2, '0'); let n = 0; D('clienti').forEach((c) => (c.offerte || []).forEach((o) => { if (String((o.preventivo || {}).riferimento || '').indexOf(now.getFullYear() + '-' + mm) === 0) n++; })); return now.getFullYear() + '-' + mm + '-M' + String(n + 1).padStart(2, '0'); }
 A.prevNew = (d) => { const c = G('clienti', d.id); if (!c) return; openForm({ title: 'Nuovo preventivo', fields: [{ k: 'titolo', l: 'Oggetto dell’offerta', req: true, ph: 'Es. Impianto FV 6 kW + accumulo' }], values: {}, onSave: async (v) => { const pv = nuovoPrev(); const o = { id: uid(), numero: nextNumOff(), data: today(), esito: 'TRATTATIVA', titolo: v.titolo, preventivo: pv, documenti: [] }, arr = clone(G('clienti', d.id).offerte || []); arr.push(o); const doc2 = clone(G('clienti', d.id)); doc2.offerte = arr; applyLocalWrite('clienti', d.id, doc2); await patch('clienti', d.id, { offerte: arr }); S.prev = clone(pv); go('preventivo', d.id, o.id); } }); };
 A.prevSave = async (d) => { const arr = clone(G('clienti', d.id).offerte || []), i = arr.findIndex((x) => x.id === d.x); if (i < 0) { toast('Offerta non trovata.', 'err'); return; } const T = prevTotals(S.prev); arr[i].preventivo = clone(S.prev); arr[i].importo = T.imp; const doc2 = clone(G('clienti', d.id)); doc2.offerte = arr; applyLocalWrite('clienti', d.id, doc2); try { await patch('clienti', d.id, { offerte: arr }); toast('Preventivo salvato · al cliente ' + eur2(T.tot) + ' IVA inclusa · margine ' + T.margineEff + '%.'); } catch (e) { toast('Salvataggio non riuscito.', 'err'); } };
-A.prevPdf = async (d) => { await A.prevSave(d); const c = G('clienti', d.id), o = (c.offerte || []).find((x) => x.id === d.x); if (o) printHtml(preventivoHtml(c, o), true); };
+A.prevPdf = async (d) => { await A.prevSave(d); const c = G('clienti', d.id), o = (c.offerte || []).find((x) => x.id === d.x); if (o) printHtml(preventivoHtml(c, o), true, 'Offerta ' + (offNum(o) || c.ragioneSociale)); };
 A.prevDocNew = (d) => { const c = G('clienti', d.id); if (!c) return; openForm({ title: 'Allega documento', info: 'Bolletta, progetto, foto di sopralluogo, scheda tecnica…', fields: [{ k: 'titolo', l: 'Titolo', req: true }, { k: 'tipo', l: 'Tipo', t: 'select', req: true, half: true, opts: DOC_TIPI }, { k: 'file', l: 'File', t: 'file' }], values: { tipo: 'BOLLETTA' }, folder: ['Clienti', c.ragioneSociale, 'Offerte e preventivi', 'Documenti'], onSave: async (v) => { const arr = clone(G('clienti', d.id).offerte || []), i = arr.findIndex((x) => x.id === d.x); if (i < 0) return; arr[i].documenti = (arr[i].documenti || []).concat([{ id: uid(), titolo: v.titolo, tipo: v.tipo, file: v.file }]); const doc2 = clone(G('clienti', d.id)); doc2.offerte = arr; applyLocalWrite('clienti', d.id, doc2); await patch('clienti', d.id, { offerte: arr }); } }); };
 A.prevDocDel = async (d) => { if (!(await confirmBox('Togliere questo documento dall’offerta?', 'Togli'))) return; const arr = clone(G('clienti', S.id).offerte || []), i = arr.findIndex((x) => x.id === S.tab); if (i < 0) return; arr[i].documenti = (arr[i].documenti || []).filter((x) => x.id !== d.did); const doc2 = clone(G('clienti', S.id)); doc2.offerte = arr; applyLocalWrite('clienti', S.id, doc2); await patch('clienti', S.id, { offerte: arr }); };
 A.prevAccetta = async (d) => { await A.prevSave(d); const arr = clone(G('clienti', d.id).offerte || []), i = arr.findIndex((x) => x.id === d.x); if (i >= 0) { arr[i].esito = 'ACCETTATA'; const doc2 = clone(G('clienti', d.id)); doc2.offerte = arr; applyLocalWrite('clienti', d.id, doc2); await patch('clienti', d.id, { offerte: arr }); } offAccettata(d.id, d.x); };
@@ -1785,7 +1785,7 @@ A.prevConferma = (d) => {
     '<p class="small muted">Tocca prima “Anteprima / salva PDF” per salvare la conferma, poi “Invia al cliente”.</p>' +
     '<div class="row" style="flex-wrap:wrap;gap:8px"><button class="btn" data-a="close">Chiudi</button><button class="btn" data-a="prevConfPdf" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Anteprima / salva PDF</button><button class="btn p" data-a="prevConfSend" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Invia al cliente</button></div>', true);
 };
-A.prevConfPdf = (d) => { const c = G('clienti', d.id), o = c && (c.offerte || []).find((x) => x.id === d.x); if (o) printHtml(confermaHtml(c, o), true); };
+A.prevConfPdf = (d) => { const c = G('clienti', d.id), o = c && (c.offerte || []).find((x) => x.id === d.x); if (o) printHtml(confermaHtml(c, o), true, 'Conferma ordine ' + (confNum(o) || c.ragioneSociale)); };
 A.prevConfSend = async (d) => {
   const c = G('clienti', d.id), o = c && (c.offerte || []).find((x) => x.id === d.x); if (!o) return;
   const to = ((document.getElementById('cm_to') || {}).value || '').trim(), sub = (document.getElementById('cm_sub') || {}).value || '', body = (document.getElementById('cm_body') || {}).value || '';
@@ -2748,43 +2748,62 @@ const saveXls = (html, nome) => { const blob = new Blob(['﻿<html xmlns:x="urn:
    pannello a schermo intero dentro l'app, con «Chiudi» e «Stampa / Salva PDF». In stampa nascondiamo
    tutto il resto dell'app e lasciamo solo il contenuto, in A4 orizzontale. */
 let printStyleAdded = false;
-const printHtml = (html, portrait) => {
+const printHtml = (html, portrait, filename) => {
   const old = document.getElementById('printOverlay'); if (old) old.remove();
   if (!printStyleAdded) {
     const st = document.createElement('style');
-    st.textContent = '#printOverlay{position:fixed;inset:0;z-index:9999;background:#fff;overflow:auto;-webkit-overflow-scrolling:touch}#printOverlay .ptoolbar{position:sticky;top:0;display:flex;gap:10px;align-items:center;justify-content:space-between;background:#1B1F23;color:#fff;padding:12px 16px}#printOverlay .ptoolbar button{padding:10px 16px;border:0;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer}#printOverlay .ptoolbar .pclose{background:#3a3f45;color:#fff}#printOverlay .ptoolbar .pprint{background:#fff;color:#1B1F23}#printOverlay .pbody{padding:12px;color:#000}@media print{@page{size:A4 landscape;margin:10mm}body{background:#fff!important}body>*:not(#printOverlay){display:none!important}#printOverlay{position:static!important;overflow:visible!important}#printOverlay .ptoolbar{display:none!important}#printOverlay .pbody{padding:0!important}}';
+    st.textContent = '#printOverlay{position:fixed;inset:0;z-index:9999;background:#fff;overflow:auto;-webkit-overflow-scrolling:touch}#printOverlay .ptoolbar{position:sticky;top:0;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#1B1F23;color:#fff;padding:10px 12px}#printOverlay .ptoolbar button{padding:10px 14px;border:0;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer}#printOverlay .ptoolbar .pclose{background:#3a3f45;color:#fff}#printOverlay .ptoolbar .psave{background:#1a7f37;color:#fff}#printOverlay .ptoolbar .pprint{background:#fff;color:#1B1F23}#printOverlay .ptoolbar button:disabled{opacity:.6}#printOverlay .pbody{padding:12px;color:#000}@media print{@page{size:A4 landscape;margin:10mm}body{background:#fff!important}body>*:not(#printOverlay){display:none!important}#printOverlay{position:static!important;overflow:visible!important}#printOverlay .ptoolbar{display:none!important}#printOverlay .pbody{padding:0!important}}';
     document.head.appendChild(st); printStyleAdded = true;
   }
+  const name = (filename || ('Documento ' + today())).replace(/[\\/:*?"<>|]+/g, ' ').trim();
+  const docFor = () => '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@page{size:A4 ' + (portrait ? 'portrait' : 'landscape') + ';margin:' + (portrait ? '12mm' : '10mm') + '}html,body{margin:0}body{font-family:Arial,Helvetica,sans-serif;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}img{max-width:100%}</style></head><body>' + html + '</body></html>';
   const ov = document.createElement('div'); ov.id = 'printOverlay';
-  ov.innerHTML = '<div class="ptoolbar"><button class="pclose" type="button">← Chiudi</button><span style="font-family:Arial;font-size:14px">Anteprima</span><button class="pprint" type="button">Stampa / Salva PDF</button></div><div class="pbody">' + html + '</div>';
+  ov.innerHTML = '<div class="ptoolbar"><button class="pclose" type="button">← Chiudi</button><div style="display:flex;gap:8px"><button class="psave" type="button">Salva PDF</button><button class="pprint" type="button">Stampa</button></div></div><div class="pbody">' + html + '</div>';
   document.body.appendChild(ov);
   const chiudi = () => { ov.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = (e) => { if (e.key === 'Escape') chiudi(); };
   ov.querySelector('.pclose').onclick = chiudi;
-  /* la stampa avviene da un iframe isolato: nell'app installata (standalone) window.print() della
-     pagina spesso non apre la stampa, mentre la stampa di un iframe con il solo contenuto è
-     affidabile. L'orientamento (verticale per offerta/conferma) è nel documento dell'iframe. */
-  ov.querySelector('.pprint').onclick = () => {
-    /* L'iframe di stampa deve avere dimensioni reali ed essere opaco, altrimenti il PDF salvato
-       esce bianco (con width/height 0 il documento non viene impaginato). Lo mettiamo a tutto
-       schermo ma dietro all'anteprima (z-index più basso), così è impaginato ma non si vede, e
-       aspettiamo che le immagini (logo, loghi TÜV) siano caricate prima di stampare. */
-    const doc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@page{size:A4 ' + (portrait ? 'portrait' : 'landscape') + ';margin:' + (portrait ? '12mm' : '10mm') + '}html,body{margin:0}body{font-family:Arial,Helvetica,sans-serif;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}img{max-width:100%}</style></head><body>' + html + '</body></html>';
+  /* Stampa dal browser: iframe isolato a tutto schermo ma dietro l'anteprima (così è impaginato e
+     non esce bianco), aspettando le immagini. Su alcuni telefoni in modalità app la stampa del
+     browser non si apre: per quello c'è "Salva PDF", che genera il PDF sul server. */
+  const stampaBrowser = () => {
     const f = document.createElement('iframe'); f.setAttribute('aria-hidden', 'true'); f.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;border:0;z-index:1;background:#fff';
     f.onload = () => {
       const w = f.contentWindow, dd = f.contentDocument, imgs = dd ? Array.prototype.slice.call(dd.images) : [];
       let done = false;
-      const go = () => { if (done) return; done = true; try { w.focus(); w.print(); } catch (e) { toast('Stampa non riuscita su questo dispositivo.', 'err'); } setTimeout(() => { try { f.remove(); } catch (e) { /* ignora */ } }, 3000); };
+      const go = () => { if (done) return; done = true; try { w.focus(); w.print(); } catch (e) { toast('Stampa non riuscita su questo dispositivo: usa “Salva PDF”.', 'err'); } setTimeout(() => { try { f.remove(); } catch (e) { /* ignora */ } }, 3000); };
       let pending = imgs.filter((im) => !im.complete).length;
       if (!pending) { setTimeout(go, 200); } else { const one = () => { if (--pending <= 0) setTimeout(go, 100); }; imgs.forEach((im) => { if (im.complete) return; im.addEventListener('load', one); im.addEventListener('error', one); }); setTimeout(go, 2000); }
     };
-    document.body.appendChild(f); f.srcdoc = doc;
+    document.body.appendChild(f); f.srcdoc = docFor();
+  };
+  ov.querySelector('.pprint').onclick = stampaBrowser;
+  /* Salva PDF: genera il PDF sul server (Apps Script) e lo apre. Funziona anche nell'app su
+     telefono, dove la stampa del browser spesso non parte. Apro subito una scheda vuota (gesto
+     dell'utente) e poi ci carico il PDF; se il server non è disponibile, ripiego sulla stampa. */
+  ov.querySelector('.psave').onclick = async () => {
+    const btn = ov.querySelector('.psave'), lbl = btn.textContent;
+    let win = null; try { win = window.open('', '_blank'); } catch (e) { win = null; }
+    if (win) { try { win.document.write('<!doctype html><meta charset="utf-8"><title>PDF</title><p style="font-family:Arial;padding:16px;color:#333">Preparazione del PDF…</p>'); } catch (e) { /* ignora */ } }
+    btn.disabled = true; btn.textContent = 'Preparazione…';
+    try {
+      const r = await scriptOnce('makePdf', { html: docFor(), filename: name });
+      const bin = atob(r.base64), arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
+      if (win) { win.location = url; } else { const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.download = r.filename || (name + '.pdf'); document.body.appendChild(a); a.click(); document.body.removeChild(a); }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      if (win) { try { win.close(); } catch (e2) { /* ignora */ } }
+      toast('PDF dal server non disponibile: provo la stampa del browser.', 'err');
+      stampaBrowser();
+    } finally { btn.disabled = false; btn.textContent = lbl; }
   };
   document.addEventListener('keydown', onKey);
 };
 const dettSel = async (d) => { const m = S.mese || meseOggi(); if (d.u) return { m: m, ps: [persObj(d.u, m)] }; await loadAllOre(m, true); return { m: m, ps: righeAcc(m) }; };
 A.oreDettXls = async (d) => { const x = await dettSel(d); if (!x.ps.length) return; saveXls(dettHtml(x.ps, x.m, false), 'ore-' + x.m + (d.u ? '-' + String(x.ps[0].nome).toLowerCase().replace(/[^a-z0-9]+/g, '-') : '-dettaglio-per-persona') + '.xls'); };
-A.oreDettPdf = async (d) => { const x = await dettSel(d); if (!x.ps.length) return; printHtml(dettHtml(x.ps, x.m, true)); };
+A.oreDettPdf = async (d) => { const x = await dettSel(d); if (!x.ps.length) return; printHtml(dettHtml(x.ps, x.m, true), false, 'Dettaglio ore ' + (d.u && x.ps[0] ? x.ps[0].nome + ' ' : '') + meseLabel(x.m)); };
 A.oreXls = async () => {
   const m = S.mese || meseOggi(); await loadAllOre(m, true);
   const rows = riepilogoRows(m, righeAcc(m));
@@ -2796,7 +2815,7 @@ A.orePrint = async () => {
   const m = S.mese || meseOggi(); await loadAllOre(m, true);
   const rows = riepilogoRows(m, righeAcc(m)), par = OREPAR();
   const nota = '<p style="font-family:Arial;font-size:11px">Lo straordinario è calcolato al netto del tragitto: ogni giorno feriale le prime ' + decOre(par.oreGiorno * 60) + ' ore di lavoro effettivo sono ordinarie, le ore in più sono straordinario; sabato, domenica e festivi tutto straordinario. Il tragitto resta nelle ore lavorate ma non diventa mai straordinario.</p>';
-  printHtml(tabellaHtml(rows, 'Riepilogo ore del personale · ' + meseLabel(m), true) + nota);
+  printHtml(tabellaHtml(rows, 'Riepilogo ore del personale · ' + meseLabel(m), true) + nota, false, 'Riepilogo ore ' + meseLabel(m));
 };
 A.oreCsv = async (d) => {
   if (!dl) { toast('L\u2019esportazione non è disponibile in questa vista.', 'err'); return; }
