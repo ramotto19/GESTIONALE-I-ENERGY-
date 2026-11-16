@@ -415,7 +415,14 @@ function tbl(cols, rows, o) {
   return '<div class="scroll"><table class="tbl"><thead><tr>' + cols.map((c) => '<th' + (c.r ? ' class="r"' : '') + '>' + esc(c.h) + '</th>').join('') + '</tr></thead><tbody>' + rows.map((r, i) => { const at = o.row ? o.row(r, i) : ''; return '<tr' + (at ? ' class="clk" ' + at : '') + '>' + cols.map((c) => '<td' + (c.r ? ' class="r"' : '') + '>' + c.f(r, i) + '</td>').join('') + '</tr>'; }).join('') + '</tbody></table></div>';
 }
 const safeUrl = (u) => { try { const x = new URL(String(u).trim()); return x.protocol === 'https:' ? x.href : ''; } catch (e) { return ''; } };
-const fileLink = (f) => (f && f.url && safeUrl(f.url) ? '<a class="lnk" href="' + esc(safeUrl(f.url)) + '" target="_blank" rel="noopener">' + esc(f.name || 'Apri su Drive') + '</a>' : f && f.id ? '<span class="muted">' + esc(f.name || 'Allegato') + ' (link non disponibile)</span>' : '<span class="muted">—</span>');
+/* Link per aprire un allegato: usa l'URL salvato se c'è, altrimenti costruisce il link di Drive
+   dall'ID del file (gli allegati sono condivisi "chiunque con il link"). Così il nome del file è
+   sempre un vero link cliccabile e, dentro una riga cliccabile, apre il PDF invece della scheda. */
+const fileLink = (f) => {
+  if (!f) return '<span class="muted">—</span>';
+  const u = (f.url && safeUrl(f.url)) ? safeUrl(f.url) : (f.id ? 'https://drive.google.com/file/d/' + encodeURIComponent(f.id) + '/view' : '');
+  return u ? '<a class="lnk" href="' + esc(u) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(f.name || 'Apri il file') + '</a>' : '<span class="muted">—</span>';
+};
 function scadBadge(d) {
   if (!d) return '<span class="muted">—</span>';
   const n = diff(d, today());
