@@ -706,9 +706,9 @@ function eventi() {
   });
   D('docAzienda').filter((x) => !x.archiviato).forEach((x) => push(x.dataScadenza, 'AZIENDA', x.titolo || lab(TIPI_DOC_AZ, x.tipo), x.ente || '', { r: 'azienda', tab: 'documenti' }));
   D('assicurazioni').filter((x) => !x.archiviato).forEach((x) => push(x.dataScadenza, 'ASSICURAZIONE', lab(TIPI_ASS, x.tipo), x.compagnia || '', { r: 'azienda', tab: 'assicurazioni' }));
-  D('fatture').filter((f) => !fatSaldata(f) && f.scadenza).forEach((f) => push(f.scadenza, 'FATTURA', (f.dir === 'P' ? 'Da pagare: ' : 'Da incassare: ') + (f.controparte || '') + ' · ' + eur2(residuoFat(f)), (f.tipo === 'PAGAMENTO' ? 'Pagamento' : 'Fattura ' + (f.numero || '')), { r: 'fatture', tab: f.tipo === 'PAGAMENTO' ? 'PAG' : f.dir }));
+  D('fatture').filter((f) => !fatSaldata(f) && f.scadenza).forEach((f) => push(f.scadenza, 'FATTURA', (f.dir === 'P' ? 'Da pagare: ' : 'Da incassare: ') + (f.controparte || '') + ' · ' + eur2(residuoFat(f)), (f.tipo === 'PAGAMENTO' ? 'Pagamento' : 'Fattura ' + (f.numero || '')), { r: 'fatture', tab: f.dir }));
   /* acconti programmati (data futura): promemoria sul calendario alla data prevista */
-  D('fatture').forEach((f) => (f.acconti || []).forEach((a) => { if (!accPagato(a) && a.data) push(a.data, 'FATTURA', (f.dir === 'P' ? 'Acconto da pagare: ' : 'Acconto da incassare: ') + (f.controparte || '') + ' · ' + eur2(a.importo), (f.tipo === 'PAGAMENTO' ? 'Pagamento' : 'Fattura ' + (f.numero || '')), { r: 'fatture', tab: f.tipo === 'PAGAMENTO' ? 'PAG' : f.dir }); }));
+  D('fatture').forEach((f) => (f.acconti || []).forEach((a) => { if (!accPagato(a) && a.data) push(a.data, 'FATTURA', (f.dir === 'P' ? 'Acconto da pagare: ' : 'Acconto da incassare: ') + (f.controparte || '') + ' · ' + eur2(a.importo), (f.tipo === 'PAGAMENTO' ? 'Pagamento' : 'Fattura ' + (f.numero || '')), { r: 'fatture', tab: f.dir }); }));
   D('mezzi').filter((m) => m.attivo !== false).forEach((m) => {
     /* revisione e bollo arrivano già da qui sotto (sono due dei tipi di controllo), presi
        dall'ultimo controllo di quel tipo caricato: niente più campo scadenza separato da tenere
@@ -4106,7 +4106,7 @@ const meseCap = (m) => meseLabel(m).charAt(0).toUpperCase() + meseLabel(m).slice
 A.fatPrimaNota = () => {
   const mesi = []; for (let k = 0; k >= -15; k--) mesi.push(addMese(meseOggi(), k));
   openForm({ title: 'Prima nota — scegli il mese', info: 'Esporta in Excel tutte le fatture (passive e attive) del mese scelto, in ordine di data, pronte per la commercialista.', fields: [{ k: 'mese', l: 'Mese', t: 'select', req: true, opts: mesi.map((m) => [m, meseCap(m)]) }], values: { mese: meseOggi() }, onSave: (v) => {
-    const mm = v.mese, list = D('fatture').filter((f) => f.tipo !== 'PAGAMENTO' && String(f.data || '').slice(0, 7) === mm).sort((a, b) => String(a.data || '').localeCompare(String(b.data || '')) || String(a.numero || '').localeCompare(String(b.numero || '')));
+    const mm = v.mese, list = D('fatture').filter((f) => String(f.data || '').slice(0, 7) === mm).sort((a, b) => String(a.data || '').localeCompare(String(b.data || '')) || String(a.numero || '').localeCompare(String(b.numero || '')));
     if (!list.length) throw { vmsg: 'Nessuna fattura in ' + meseLabel(mm) + '.' };
     saveXls(primaNotaHtml(list, 'Prima nota fatture — ' + meseCap(mm)), 'prima-nota-' + mm + '.xls');
   } });
@@ -4124,54 +4124,35 @@ const fatNorm = (v) => { const o = Object.assign({}, v); ['imponibile', 'iva', '
 A.fatNew = () => openForm({ title: S.ftab === 'A' ? 'Nuova fattura attiva' : 'Nuova fattura passiva', wide: true, fields: fatFields(), values: { data: today() }, folder: (out) => fattPath(S.ftab === 'A' ? 'A' : 'P', out.data), onSave: (v) => put('fatture', newId('fatture'), Object.assign(fatNorm(v), { dir: S.ftab === 'A' ? 'A' : 'P', importatoIl: today() })) });
 A.fatEdit = (d) => { const x = G('fatture', d.id); if (!x) return; const fields = [{ k: 'dir', l: 'Tipo di fattura', t: 'select', req: true, half: true, opts: [['P', 'Passiva (fornitore)'], ['A', 'Attiva (cliente)']], hint: 'Spostala tra passive e attive se è stata classificata nel modo sbagliato: la scelta viene mantenuta anche dopo la sincronizzazione con DocEasy.' }].concat(fatFields()); openForm({ title: 'Fattura ' + (x.numero || ''), wide: true, fields: fields, values: x, folder: fattPath(x.dir, x.data), onSave: (v) => { const nd = v.dir === 'A' ? 'A' : 'P', o = fatNorm(v); o.dir = nd; if (nd !== x.dir) o.dirFix = true; return patch('fatture', x.id, o); }, onDelete: () => remove('fatture', x.id) }); };
 function vFatture() {
-  if (S.tab === 'A' || S.tab === 'P' || S.tab === 'PAG') { S.ftab = S.tab; S.tab = null; }
-  const ftab = (S.ftab === 'A' || S.ftab === 'PAG') ? S.ftab : 'P';
-  const tabs = '<div class="tabs" role="tablist">' + [['P', 'Passive (fornitori)'], ['A', 'Attive (clienti)'], ['PAG', 'Pagamenti']].map((x) => '<button class="tab' + (ftab === x[0] ? ' on' : '') + '" data-a="ftab" data-t="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
-  const actions = ftab === 'PAG'
-    ? '<button class="btn" data-a="fatPrimaNota">Prima nota (Excel)</button><button class="btn p" data-a="spesaNew">+ Pagamento</button>'
-    : '<button class="btn" data-a="fatPrimaNota">Prima nota (Excel)</button><button class="btn" data-a="fatNew">+ Fattura manuale</button><button class="btn" data-a="spesaNew">+ Pagamento</button><button class="btn p" data-a="fatImport">Importa XML o ZIP</button>';
-  const head = pageHead('Fatture e pagamenti', 'Fatture elettroniche passive e attive e pagamenti senza fattura (affitto, assicurazioni…). Le voci collegate a una commessa entrano nei suoi costi; scadenze e acconti programmati compaiono nel calendario.', actions);
-  if (ftab === 'PAG') return head + tabs + vPagamenti();
+  if (S.tab === 'A' || S.tab === 'P') { S.ftab = S.tab; S.tab = null; }
+  const ftab = S.ftab === 'A' ? 'A' : 'P';
+  const tabs = '<div class="tabs" role="tablist">' + [['P', 'Passive e pagamenti'], ['A', 'Attive (clienti)']].map((x) => '<button class="tab' + (ftab === x[0] ? ' on' : '') + '" data-a="ftab" data-t="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
+  const actions = '<button class="btn" data-a="fatPrimaNota">Prima nota (Excel)</button><button class="btn" data-a="fatNew">+ Fattura manuale</button><button class="btn" data-a="spesaNew">+ Pagamento</button><button class="btn p" data-a="fatImport">Importa XML o ZIP</button>';
+  const head = pageHead('Fatture e pagamenti', 'Fatture elettroniche passive e attive e pagamenti senza fattura (affitto, assicurazioni…), insieme. Le voci collegate a una commessa entrano nei suoi costi; scadenze e acconti programmati compaiono nel calendario.', actions);
   const dir = ftab === 'A' ? 'A' : 'P', fil = S.ffil || 'tutte', q = String(S.q || '').toLowerCase();
-  const tutte = D('fatture').filter((f) => f.dir === dir && f.tipo !== 'PAGAMENTO'), aperte = tutte.filter((f) => !fatSaldata(f)), scad = aperte.filter((f) => f.scadenza && f.scadenza < today());
+  const tutte = D('fatture').filter((f) => f.dir === dir), aperte = tutte.filter((f) => !fatSaldata(f)), scad = aperte.filter((f) => f.scadenza && f.scadenza < today());
   const senza = tutte.filter((f) => !f.commessaId && !f.generale);
-  const filtri = { tutte: tutte, aperte: aperte, scadute: scad, senza: senza };
-  const rows = (filtri[fil] || tutte).filter((f) => !q || ((f.controparte || '') + ' ' + (f.numero || '') + ' ' + (f.descrizione || '')).toLowerCase().includes(q)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+  const soloPag = tutte.filter((f) => f.tipo === 'PAGAMENTO');
+  const filtri = { tutte: tutte, aperte: aperte, scadute: scad, senza: senza, pagamenti: soloPag };
+  const rows = (filtri[fil] || tutte).filter((f) => !q || ((f.controparte || '') + ' ' + (f.numero || '') + ' ' + (f.descrizione || '') + ' ' + (f.tipo === 'PAGAMENTO' ? lab(CAT_PAG, f.categoria || 'ALTRO') : '')).toLowerCase().includes(q)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
   const chip = (k, t, n) => '<button class="btn sm' + (fil === k ? ' p' : '') + '" data-a="ffil" data-f="' + k + '">' + t + ' (' + n + ')</button>';
-  /* riepilogo in alto: stato di pagamento delle fatture elettroniche (i pagamenti senza fattura
-     hanno il loro riepilogo nella scheda Pagamenti). Gli acconti già versati si sottraggono dal
-     totale; quelli con data futura (programmati) restano fuori finché non arriva la data. */
-  const allF = D('fatture').filter((f) => f.tipo !== 'PAGAMENTO'), openSum = (d) => sum(allF.filter((f) => f.dir === d && !fatSaldata(f)), residuoFat), paidSum = (d) => sum(allF.filter((f) => f.dir === d), (f) => fatSaldata(f) ? num(f.tot) : accTot(f)), openN = (d) => allF.filter((f) => f.dir === d && !fatSaldata(f)).length, paidN = (d) => allF.filter((f) => f.dir === d && fatSaldata(f)).length;
-  const nfP = (n) => n + (n === 1 ? ' fattura passiva' : ' fatture passive'), nfA = (n) => n + (n === 1 ? ' fattura attiva' : ' fatture attive');
+  /* riepilogo in alto: stato di pagamento di tutte le voci (fatture elettroniche e pagamenti).
+     Gli acconti contrassegnati "pagato" si sottraggono dal totale; quelli futuri (programmati) o
+     scaduti restano fuori finché non vengono segnati come pagati. */
+  const allF = D('fatture'), openSum = (d) => sum(allF.filter((f) => f.dir === d && !fatSaldata(f)), residuoFat), paidSum = (d) => sum(allF.filter((f) => f.dir === d), (f) => fatSaldata(f) ? num(f.tot) : accTot(f)), openN = (d) => allF.filter((f) => f.dir === d && !fatSaldata(f)).length, paidN = (d) => allF.filter((f) => f.dir === d && fatSaldata(f)).length;
+  const nfP = (n) => n + (n === 1 ? ' voce passiva' : ' voci passive'), nfA = (n) => n + (n === 1 ? ' fattura attiva' : ' fatture attive');
   const rip = '<div class="grid g4" style="margin-bottom:16px">' + kpi('Da pagare', eur2(openSum('P')), nfP(openN('P'))) + kpi('Pagate', eur2(paidSum('P')), nfP(paidN('P'))) + kpi('Da incassare', eur2(openSum('A')), nfA(openN('A'))) + kpi('Incassate', eur2(paidSum('A')), nfA(paidN('A'))) + '</div>';
-  return head + rip + tabs +
-    '<div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0 10px">' + chip('tutte', 'Tutte', tutte.length) + chip('aperte', dir === 'P' ? 'Da pagare' : 'Da incassare', aperte.length) + chip('scadute', 'Scadute', scad.length) + chip('senza', 'Da collegare', senza.length) + '<input id="q" data-in="q" placeholder="Cerca fattura" aria-label="Cerca" value="' + esc(S.q) + '" style="margin-left:auto;max-width:240px"></div>' +
-    '<section class="card">' + fattMese(rows, dir) + '</section><p class="small muted" style="margin-top:10px">Importazione automatica dal software di fatturazione (DocEasy): in preparazione. Intanto puoi caricare a mano gli XML (anche firmati .p7m o in uno ZIP): ogni fattura già presente non viene duplicata.</p>';
+  const chips = '<div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0 10px">' + chip('tutte', 'Tutte', tutte.length) + chip('aperte', dir === 'P' ? 'Da pagare' : 'Da incassare', aperte.length) + chip('scadute', 'Scadute', scad.length) + chip('senza', 'Da collegare', senza.length) + (dir === 'P' ? chip('pagamenti', 'Solo pagamenti', soloPag.length) : '') + '<input id="q" data-in="q" placeholder="Cerca" aria-label="Cerca" value="' + esc(S.q) + '" style="margin-left:auto;max-width:240px"></div>';
+  return head + rip + tabs + chips +
+    '<section class="card">' + fattMese(rows, dir) + '</section><p class="small muted" style="margin-top:10px">Le fatture elettroniche si importano con «Importa XML o ZIP»; i pagamenti senza fattura (affitto, assicurazioni, tasse…) si aggiungono con «+ Pagamento». Importazione automatica da DocEasy: in preparazione.</p>';
 }
-/* ---- Pagamenti senza fattura (affitto, assicurazioni, tasse…) ---- */
+/* ---- Pagamenti senza fattura (affitto, assicurazioni, tasse…): salvati tra le fatture passive ---- */
 const CAT_PAG = [['AFFITTO', 'Affitto'], ['ASSICURAZIONE', 'Assicurazione'], ['UTENZE', 'Utenze'], ['TASSE', 'Tasse e imposte'], ['STIPENDI', 'Stipendi'], ['CONTRIBUTI', 'Contributi / INPS'], ['LEASING', 'Leasing / finanziamenti'], ['CONSULENZE', 'Consulenze'], ['ALTRO', 'Altro']];
 const pagPath = (data) => ['Azienda', FOLD_AMM, String(data || today()).slice(0, 4), 'Pagamenti'];
 const spesaFields = () => [{ k: "categoria", l: 'Tipo di spesa', t: 'select', req: true, half: true, opts: CAT_PAG }, { k: 'data', l: 'Data', t: 'date', req: true, half: true }, { k: 'controparte', l: 'Beneficiario (a chi)', req: true }, { k: 'descrizione', l: 'Causale / descrizione', req: true }, { k: 'tot', l: 'Importo (€)', t: 'number', req: true, half: true }, { k: 'scadenza', l: 'Scadenza', t: 'date', half: true }, { k: 'commessaId', l: 'Commessa (se collegata)', t: 'select', half: true, opts: D('commesse').sort((a, b) => String(b.codice).localeCompare(String(a.codice))).map((c) => [c.id, commessaLabel(c)]) }, { k: 'generale', l: 'Spesa generale (non legata a una commessa)', t: 'checkbox' }, { k: 'rate', l: 'A rate / acconti', t: 'checkbox', half: true }, { k: 'pagata', l: 'Già pagato del tutto', t: 'checkbox', half: true }, { k: 'dataPagamento', l: 'Data del pagamento', t: 'date', half: true }, { k: 'modalita', l: 'Modalità', t: 'select', half: true, opts: MODALITA }, { k: 'note', l: 'Note', t: 'textarea', rows: 2 }, { k: 'file', l: 'Ricevuta / documento (PDF)', t: 'file' }];
 const pagNorm = (v) => { const o = Object.assign({}, v); o.tot = r2(num(o.tot)); o.imponibile = o.tot; o.iva = 0; if (o.commessaId) o.generale = false; return o; };
 A.spesaNew = () => openForm({ title: "Nuovo pagamento", wide: true, fields: spesaFields(), values: { data: today(), generale: true }, folder: (out) => pagPath(out.data), onSave: (v) => put('fatture', newId('fatture'), Object.assign(pagNorm(v), { dir: 'P', tipo: 'PAGAMENTO', importatoIl: today() })) });
 A.spesaEdit = (d) => { const x = G("fatture", d.id); if (!x) return; openForm({ title: "Pagamento", wide: true, fields: spesaFields(), values: x, folder: pagPath(x.data), onSave: (v) => patch('fatture', x.id, Object.assign(pagNorm(v), { dir: 'P', tipo: 'PAGAMENTO' })), onDelete: () => remove('fatture', x.id) }); };
-function vPagamenti() {
-  const q = String(S.q || '').toLowerCase();
-  const all = D('fatture').filter((f) => f.tipo === 'PAGAMENTO');
-  const totP = sum(all, (f) => num(f.tot)), pagato = sum(all, (f) => fatSaldata(f) ? num(f.tot) : accTot(f)), dapag = sum(all.filter((f) => !fatSaldata(f)), residuoFat), apN = all.filter((f) => !fatSaldata(f)).length;
-  const rip = '<div class="grid g4" style="margin:4px 0 16px">' + kpi('Totale pagamenti', eur2(totP), all.length + (all.length === 1 ? ' voce' : ' voci')) + kpi('Pagato', eur2(pagato)) + kpi('Da pagare', eur2(dapag), apN + (apN === 1 ? ' aperta' : ' aperte')) + '</div>';
-  const list = all.filter((f) => !q || ((f.controparte || '') + ' ' + (f.descrizione || '') + ' ' + lab(CAT_PAG, f.categoria || 'ALTRO')).toLowerCase().includes(q)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
-  const body = list.length ? tbl([
-    { h: 'Data', f: (f) => esc(fmtD(f.data)) },
-    { h: 'Causale', f: (f) => bd(lab(CAT_PAG, f.categoria || 'ALTRO'), 'teal') + ' <b>' + esc(f.descrizione || '') + '</b>' },
-    { h: 'Beneficiario', f: (f) => esc(f.controparte || '') },
-    { h: 'Importo', r: true, f: (f) => '<b>' + eur2(f.tot) + '</b>' + (accScad(f) > 0 ? '<div class="small" style="color:#b3261e">scaduti ' + eur2(accScad(f)) + '</div>' : '') + (accProg(f) > 0 ? '<div class="small" style="color:#8a6d00">programmati ' + eur2(accProg(f)) + '</div>' : '') },
-    { h: 'Scadenza', f: (f) => esc(fmtD(f.scadenza)) },
-    { h: 'Stato', f: (f) => fatStato(f) + (f.rate || accAny(f) > 0 ? ' <button class="btn sm" data-a="fatAcconti" data-id="' + esc(f.id) + '">Acconti</button>' : '') },
-    { h: 'File', f: (f) => fileLink(f.file) }
-  ], list, { row: (f) => 'data-a="spesaEdit" data-id="' + esc(f.id) + '"' }) : '<div class="empty">Nessun pagamento registrato. Usa «+ Pagamento» per aggiungere affitti, assicurazioni, tasse e altre spese senza fattura.</div>';
-  return rip + '<div class="row" style="margin:10px 0"><input id="q" data-in="q" placeholder="Cerca pagamento" aria-label="Cerca" value="' + esc(S.q) + '" style="margin-left:auto;max-width:240px"></div><section class="card">' + body + '</section>';
-}
 /* elenco fatture diviso per mese (intestazione del mese + totale del mese) */
 function fattMese(rows, dir) {
   if (!rows.length) return '<div class="empty">' + (dir === 'P' ? 'Nessuna fattura passiva. Importa gli XML dei fornitori con «Importa XML o ZIP».' : 'Nessuna fattura attiva. Importa gli XML emessi con «Importa XML o ZIP».') + '</div>';
@@ -4180,7 +4161,7 @@ function fattMese(rows, dir) {
   const mesi = Object.keys(byM).sort((a, b) => b.localeCompare(a));
   const head = '<thead><tr><th>Data</th><th>N.</th><th>' + (dir === 'P' ? 'Fornitore' : 'Cliente') + '</th><th class="r">Imponibile</th><th class="r">IVA</th><th class="r">Totale</th><th>Scadenza</th><th>Commessa</th><th>Stato</th><th>File</th></tr></thead>';
   const comm = (f) => { const c = f.commessaId && G('commesse', f.commessaId); return c ? esc(commessaLabel(c)) : f.generale ? bd('Spesa generale', 'grey') : bd('Da collegare', 'amber'); };
-  const rowH = (f) => '<tr class="clk" data-a="fatEdit" data-id="' + esc(f.id) + '"><td>' + esc(fmtD(f.data)) + '</td><td>' + esc(f.numero) + '</td><td><b>' + esc(f.controparte) + '</b>' + (f.tipoDoc === 'TD04' ? ' ' + bd('Nota di credito', 'grey') : '') + (f.descrizione ? '<div class="small muted">' + esc(String(f.descrizione).slice(0, 80)) + '</div>' : '') + '</td><td class="r">' + eur2(f.imponibile) + '</td><td class="r">' + eur2(f.iva) + '</td><td class="r"><b>' + eur2(f.tot) + '</b>' + (accTot(f) > 0 && !fatSaldata(f) ? '<div class="small muted">residuo ' + eur2(residuoFat(f)) + '</div>' : '') + '</td><td>' + esc(fmtD(f.scadenza)) + '</td><td>' + comm(f) + '</td><td>' + fatStato(f) + (accScad(f) > 0 ? '<div class="small" style="color:#b3261e">scaduti ' + eur2(accScad(f)) + '</div>' : '') + (accProg(f) > 0 ? '<div class="small" style="color:#8a6d00">programmati ' + eur2(accProg(f)) + '</div>' : '') + (f.rate || accAny(f) > 0 ? ' <button class="btn sm" data-a="fatAcconti" data-id="' + esc(f.id) + '">Acconti</button>' : '') + '</td><td>' + fileLink(f.file) + '</td></tr>';
+  const rowH = (f) => '<tr class="clk" data-a="' + (f.tipo === 'PAGAMENTO' ? 'spesaEdit' : 'fatEdit') + '" data-id="' + esc(f.id) + '"><td>' + esc(fmtD(f.data)) + '</td><td>' + (f.tipo === 'PAGAMENTO' ? bd('Pag.', 'grey') : esc(f.numero)) + '</td><td><b>' + esc(f.controparte) + '</b>' + (f.tipo === 'PAGAMENTO' ? ' ' + bd(lab(CAT_PAG, f.categoria || 'ALTRO'), 'teal') : '') + (f.tipoDoc === 'TD04' ? ' ' + bd('Nota di credito', 'grey') : '') + (f.descrizione ? '<div class="small muted">' + esc(String(f.descrizione).slice(0, 80)) + '</div>' : '') + '</td><td class="r">' + eur2(f.imponibile) + '</td><td class="r">' + eur2(f.iva) + '</td><td class="r"><b>' + eur2(f.tot) + '</b>' + (accTot(f) > 0 && !fatSaldata(f) ? '<div class="small muted">residuo ' + eur2(residuoFat(f)) + '</div>' : '') + '</td><td>' + esc(fmtD(f.scadenza)) + '</td><td>' + comm(f) + '</td><td>' + fatStato(f) + (accScad(f) > 0 ? '<div class="small" style="color:#b3261e">scaduti ' + eur2(accScad(f)) + '</div>' : '') + (accProg(f) > 0 ? '<div class="small" style="color:#8a6d00">programmati ' + eur2(accProg(f)) + '</div>' : '') + (f.rate || accAny(f) > 0 ? ' <button class="btn sm" data-a="fatAcconti" data-id="' + esc(f.id) + '">Acconti</button>' : '') + '</td><td>' + fileLink(f.file) + '</td></tr>';
   const body = mesi.map((m) => {
     const list = byM[m].sort((a, b) => String(b.data).localeCompare(String(a.data))), tot = sum(list, (f) => f.tot);
     const lab = m === '—' ? 'Senza data' : (meseLabel(m).charAt(0).toUpperCase() + meseLabel(m).slice(1));
