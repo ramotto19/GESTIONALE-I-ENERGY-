@@ -1784,7 +1784,7 @@ A.prevConfSend = async (d) => {
   const to = ((document.getElementById('cm_to') || {}).value || '').trim(), sub = (document.getElementById('cm_sub') || {}).value || '', body = (document.getElementById('cm_body') || {}).value || '';
   if (!to) { toast('Inserisci l’email del cliente.', 'err'); return; }
   try {
-    await scriptOnce('sendConferma', { to: to, subject: sub, body: body, html: confermaDoc(c, o), filename: 'Conferma ordine ' + ((o.preventivo || {}).riferimento || c.ragioneSociale) });
+    await scriptOnce('sendConferma', { to: to, subject: sub, body: body, html: confermaDoc(c, o), filename: 'Conferma ordine ' + (confNum(o) || c.ragioneSociale) });
     toast('Conferma d’ordine inviata a ' + to + '.'); closeModal();
   } catch (e) {
     toast('Apro l’app email: allega il PDF salvato e invia.');
