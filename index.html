@@ -2291,6 +2291,12 @@ function oreDocObj(u, m, righe, nomeOverride) {
 }
 async function saveRighe(u, m, righe) {
   await put('ore/' + u + '/mesi', m, oreDocObj(u, m, righe));
+  /* se sono le PROPRIE ore, aggiorna subito la vista: "Le mie ore" legge da S.myOre, che altrimenti
+     si riallinea solo al giro di controllo successivo (fino a 15 s dopo). Senza questo, le ore appena
+     inserite o modificate sparivano dalla vista per qualche secondo, facendo sembrare che non si
+     fossero salvate (e per l'amministratore sulle proprie ore restavano vecchie, perché loadOre
+     aggiorna S.oreAll mentre la vista legge S.myOre). */
+  if (u === S.uid && S.myOre.mese === m) S.myOre = { mese: m, righe: ordina(righe), loaded: true };
   if (u !== S.uid || S.admin) await loadOre(u, m);
   queueRender();
 }
