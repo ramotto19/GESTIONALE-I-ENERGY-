@@ -1607,6 +1607,33 @@ const clientPriceOf = (v, d) => {
   if (v.tipo === 'ONERI') return r2(num(v.perc) / 100 * (d.voci || []).filter((x) => x !== v && x.tipo !== 'ONERI' && x.inPrev !== false).reduce((s, x) => s + clientPriceOf(x, d), 0));
   const pc = v.pc; return (pc !== '' && pc != null) ? r2(num(pc)) : r2(calcVoce(v, d) * (1 + margVoce(v, d) / 100));
 };
+/* ---------- Nuovo modello: riga unica (costo tuo + prezzo cliente, dal listino) ----------
+   Ogni voce è una "RIGA": nome, unità, quantità, costo unitario (cu), prezzo unitario cliente (pu,
+   vuoto = costo + margine), descrizione estesa, "incluso" (spalma il prezzo sulle altre, non la
+   mostra separata al cliente). Le vecchie voci (FV, MATERIALI, ONERI…) vengono convertite a RIGA
+   conservando gli importi. */
+function listinoCat() { const o = CFG('listinoCatalogo'); return (o && Array.isArray(o.items)) ? o.items : []; }
+async function listinoCatSave(items) { await put('impostazioni', 'listinoCatalogo', { items: items }); }
+function nuovaRiga(preset) { return Object.assign({ id: uid(), tipo: 'RIGA', nome: '', um: '', q: 1, cu: '', pu: '', margine: '', descrEstesa: '', incluso: false, inPrev: true }, preset || {}); }
+function rigaCosto(v) { return r2(num(v.q) * num(v.cu)); }
+function rigaPrezzoU(v, d) { return (v.pu !== '' && v.pu != null) ? num(v.pu) : r2(num(v.cu) * (1 + margVoce(v, d) / 100)); }
+function rigaCliente(v, d) { return r2(num(v.q) * rigaPrezzoU(v, d)); }
+function migraVoce(v, d) {
+  if (!v) return nuovaRiga();
+  if (v.tipo === 'RIGA') return v;
+  const cost = calcVoce(v, d), cli = clientPriceOf(v, d);
+  const um = v.tipo === 'MATERIALI' ? 'pz' : v.tipo === 'MANODOPERA' ? 'giorno' : v.tipo === 'VIAGGI' ? 'viaggio' : '';
+  return nuovaRiga({ id: v.id || uid(), nome: v.descrizione || lab(PREV_TIPI, v.tipo) || 'Voce', um: um, q: 1, cu: v.soloCliente ? 0 : cost, pu: cli, descrEstesa: v.descrEstesa || '', inPrev: v.inPrev !== false });
+}
+function migraPrev(d) { if (d && !d._rig) { const orig = d.voci || []; d.voci = orig.map((v) => migraVoce(v, { voci: orig, margine: d.margine })); d._rig = true; } return d; }
+/* righe come le vede il cliente: le voci "incluse" spariscono e il loro importo si spalma sulle altre. */
+function clientLines(d) {
+  migraPrev(d);
+  const vis = []; let folded = 0, visBase = 0;
+  (d.voci || []).forEach((v) => { if (v.inPrev === false) return; const imp = rigaCliente(v, d); if (v.incluso) { folded += imp; } else { vis.push({ v: v, imp: imp }); visBase += imp; } });
+  const k = visBase > 0 ? (visBase + folded) / visBase : 1;
+  return vis.map((x) => ({ nome: x.v.nome, um: x.v.um, q: x.v.q, descrEstesa: x.v.descrEstesa, importo: r2(x.imp * k) }));
+}
 function nuovaVoce(tipo) {
   const d = ld(), cc = cd(), base = { id: uid(), tipo: tipo, descrizione: '', descrEstesa: '', pc: '', margine: d.margine, inPrev: true };
   if (tipo === 'FV') { const v = Object.assign(base, { descrizione: 'Impianto fotovoltaico', kw: '', prezzoKw: d.fvKw, pannelloW: 585 }); v.descrEstesa = specDefault(v); return v; }
@@ -1621,13 +1648,35 @@ function nuovaVoce(tipo) {
 }
 function nuovoPrev() { return { voci: [], margine: ld().margine, iva: ld().iva, sconto: 0, validitaGiorni: 30, antic: 30, meta: 40, saldo: 30, riferimento: '', intro: INTRO_DEF, note: '' }; }
 const prevTotals = (d) => {
-  const costi = r2((d.voci || []).reduce((s, v) => s + calcVoce(v, d), 0));
-  const imp = r2((d.voci || []).filter((v) => v.inPrev !== false).reduce((s, v) => s + clientPriceOf(v, d), 0));
+  migraPrev(d);
+  const costi = r2((d.voci || []).reduce((s, v) => s + rigaCosto(v), 0));
+  const imp = r2((d.voci || []).filter((v) => v.inPrev !== false).reduce((s, v) => s + rigaCliente(v, d), 0));
   const sconto = r2(imp * num(d.sconto) / 100), netto = r2(imp - sconto), iva = r2(netto * num(d.iva) / 100);
   const utile = r2(netto - costi), margineEff = netto > 0 ? Math.round(utile / netto * 1000) / 10 : 0;
   return { costi: costi, imp: imp, sconto: sconto, netto: netto, iva: iva, tot: r2(netto + iva), utile: utile, margineEff: margineEff };
 };
 const pfld = (l, inner, half) => '<div class="fld' + (half ? ' half' : '') + '"><label>' + esc(l) + '</label>' + inner + '</div>';
+/* scheda di una riga del preventivo (nuovo modello unico). */
+function voceRigaCard(v, i, d) {
+  const inp = (k, label, ph, type, half) => pfld(label, '<input type="' + (type || 'text') + '"' + (type === 'number' ? ' step="any" inputmode="decimal"' : '') + ' data-in="prevEdit" data-vi="' + i + '" data-k="' + k + '" value="' + esc(v[k]) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + '>', half !== false);
+  const puAuto = eur2(rigaPrezzoU(v, d));
+  return '<div class="card" style="margin:0 0 10px">' +
+    '<div class="fgrid">' +
+      inp('nome', 'Voce (cosa è: es. cavi, split, manodopera…)', 'Descrizione della voce', 'text', false) +
+      inp('q', 'Quantità', 'es. 10', 'number', true) + inp('um', 'Unità', 'pz, m, giorno', 'text', true) +
+      inp('cu', 'Costo unitario €', '', 'number', true) +
+      pfld('Prezzo unitario cliente €', '<input type="number" step="any" inputmode="decimal" data-in="prevEdit" data-vi="' + i + '" data-k="pu" value="' + esc(v.pu) + '" placeholder="auto ' + esc(puAuto) + '">', true) +
+    '</div>' +
+    pfld('Descrizione estesa (sotto la voce nel preventivo cliente)', '<textarea data-in="prevEdit" data-vi="' + i + '" data-k="descrEstesa" rows="2" placeholder="Dettagli, marche, garanzie, inclusioni…">' + esc(v.descrEstesa || '') + '</textarea>', false) +
+    '<label class="row" style="gap:6px;align-items:flex-start;margin-top:4px;font-size:13px;cursor:pointer"><input type="checkbox" data-in="prevChk" data-vi="' + i + '" data-k="incluso"' + (v.incluso ? ' checked' : '') + ' style="width:auto;margin:3px 0 0"> <span>Includi nelle altre voci: non la mostra al cliente come riga separata, il suo prezzo si spalma sulle altre (utile per la manodopera).</span></label>' +
+    '<div class="row" style="justify-content:space-between;align-items:center;margin-top:8px;font-size:13px"><span>Costo riga: <b id="pcost_' + v.id + '">' + eur2(rigaCosto(v)) + '</b> · Al cliente: <b id="pcli_' + v.id + '">' + eur2(rigaCliente(v, d)) + '</b></span><button class="btn sm" data-a="prevDel" data-i="' + i + '">Togli</button></div>' +
+  '</div>';
+}
+/* anteprima "vista cliente": solo ciò che vede il cliente (voci incluse spalmate, niente costi). */
+function cliPreviewHtml(d) {
+  const lines = clientLines(d);
+  return lines.length ? lines.map((x) => '<div style="border-bottom:1px solid var(--ln);padding:8px 0"><div class="row" style="justify-content:space-between;gap:8px;align-items:baseline"><b>' + esc(x.nome || '—') + (x.um && num(x.q) ? ' <span class="muted" style="font-weight:400;font-size:12px">' + esc(num(x.q) + ' ' + x.um) + '</span>' : '') + '</b><b>' + eur2(x.importo) + '</b></div>' + (x.descrEstesa ? '<div class="small muted" style="white-space:pre-wrap;margin-top:2px">' + esc(x.descrEstesa) + '</div>' : '') + '</div>').join('') : '<div class="empty" style="margin:4px 0">Nessuna voce inclusa nel preventivo.</div>';
+}
 function voceCard(v, i, d) {
   const n = (k, label, ph, half) => pfld(label, '<input type="number" step="any" inputmode="decimal" data-in="prevEdit" data-vi="' + i + '" data-k="' + k + '" value="' + esc(v[k]) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + '>', half !== false);
   let body = '';
@@ -1652,34 +1701,31 @@ function vPreventivo() {
   const c = G('clienti', S.id); if (!c) return '<div class="empty">Cliente non trovato. <button class="lnk" data-a="go" data-r="clienti">Clienti</button></div>';
   const o = (c.offerte || []).find((x) => x.id === S.tab); if (!o) return '<div class="empty">Offerta non trovata. <button class="lnk" data-a="goRef" data-r="cliente" data-id="' + esc(c.id) + '">Torna al cliente</button></div>';
   if (!S.prev) S.prev = Object.assign(nuovoPrev(), clone(o.preventivo || {}));
-  const d = S.prev, T = prevTotals(d);
-  const rows = d.voci.map((v, i) => v.soloCliente ? '' : voceCard(v, i, d)).join('') || '<div class="empty" style="margin:4px 0">Nessuna voce. Aggiungi la prima qui sotto.</div>';
-  const add = '<div class="row" style="flex-wrap:wrap;gap:6px">' + PREV_TIPI.map((t) => '<button class="btn sm" data-a="prevAdd" data-t="' + t[0] + '">+ ' + esc(t[1]) + '</button>').join('') + '</div>';
+  const d = migraPrev(S.prev), T = prevTotals(d);
+  const cliView = !!S.prevCli;
+  const cat = listinoCat();
+  const pick = '<select id="prevPick"><option value="">— scegli dal listino —</option>' + cat.map((it, j) => '<option value="' + j + '">' + esc(it.nome) + (it.um ? ' (' + esc(it.um) + ')' : '') + '</option>').join('') + '</select>';
+  const add = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px">' + pick + '<button class="btn sm p" data-a="prevAddListino">+ Dal listino</button><button class="btn sm" data-a="prevAddRiga">+ Riga libera</button><button class="btn sm" data-a="listinoCat">Gestisci listino</button></div>';
+  const rows = cliView ? cliPreviewHtml(d) : (d.voci.length ? d.voci.map((v, i) => voceRigaCard(v, i, d)).join('') : '<div class="empty" style="margin:4px 0">Nessuna voce. Aggiungi la prima dal listino o come riga libera.</div>');
+  const righeCard = '<section class="card"><div class="ch"><h2>Righe del preventivo</h2><label class="row" style="gap:6px;align-items:center;font-size:13px;cursor:pointer;margin:0"><input type="checkbox" data-in="prevCliView"' + (cliView ? ' checked' : '') + ' style="width:auto;margin:0"> Vista cliente</label></div>' + (cliView ? '' : add) + rows + '</section>';
   const inp = (k, val, w) => '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="' + k + '" value="' + esc(val) + '" style="width:' + (w || 62) + 'px;display:inline-block;padding:4px 6px">';
-  const costi = '<section class="card"><div class="ch"><h2>I miei costi <span class="small muted">(riservato)</span></h2></div><div class="blk" style="justify-content:space-between"><span>Totale costi</span><b id="prevCosti">' + eur2(T.costi) + '</b></div><div class="blk" style="justify-content:space-between;align-items:center"><span>Margine predefinito ' + inp('margine', d.margine) + ' %</span><b id="prevUtile">utile ' + eur2(T.utile) + '</b></div><div class="small muted" style="margin-top:2px">Usato per le voci senza un margine proprio. Imposta il margine della singola voce nella sua scheda costo.</div></section>';
-  const cliLines = d.voci.map((v, i) => v.inPrev === false ? '' : '<div style="border-bottom:1px solid var(--ln);padding:8px 0">' +
-    '<div class="row" style="gap:8px;align-items:center"><input type="text" data-in="prevEdit" data-vi="' + i + '" data-k="descrizione" value="' + esc(v.descrizione) + '" placeholder="' + esc(lab(PREV_TIPI, v.tipo)) + '" style="flex:1;min-width:0" aria-label="Descrizione voce"><input type="number" step="any" inputmode="decimal" data-in="prevEdit" data-vi="' + i + '" data-k="pc" value="' + esc(v.pc) + '" placeholder="' + r2(clientPriceOf(v, d)) + '" style="width:100px;padding:6px 8px" aria-label="Prezzo al cliente"><button class="btn sm" data-a="prevDel" data-i="' + i + '" aria-label="Togli voce">×</button></div>' +
-    '<div class="row" style="justify-content:space-between;align-items:center;margin:6px 0 2px"><span class="small muted">Descrizione estesa (sotto la voce nel PDF)</span>' + (specDefault(v) ? '<button class="btn sm" data-a="prevSpec" data-vi="' + i + '">Standard</button>' : '') + '</div>' +
-    '<textarea data-in="prevEdit" data-vi="' + i + '" data-k="descrEstesa" rows="2" placeholder="Dettagli, marche, garanzie, inclusioni…" style="width:100%">' + esc(v.descrEstesa || '') + '</textarea>' +
-    '</div>').join('') || '<div class="empty" style="margin:4px 0">Nessuna voce inclusa nel preventivo.</div>';
-  const cli = '<section class="card"><div class="ch"><h2>Preventivo al cliente</h2><div class="row"><button class="btn sm" data-a="prevAddCli">+ Riga</button></div></div>' +
-    '<div style="margin-bottom:6px">' + cliLines + '</div>' +
-    '<div class="small muted" style="margin-bottom:10px">Descrizione e prezzo come li vede il cliente. Prezzo vuoto = automatico (costo + margine).</div>' +
+  const costi = cliView ? '' : '<section class="card"><div class="ch"><h2>I miei costi <span class="small muted">(riservato)</span></h2></div><div class="blk" style="justify-content:space-between"><span>Totale costi</span><b id="prevCosti">' + eur2(T.costi) + '</b></div><div class="blk" style="justify-content:space-between;align-items:center"><span>Margine predefinito ' + inp('margine', d.margine) + ' %</span><b id="prevUtile">utile ' + eur2(T.utile) + '</b></div><div class="small muted" style="margin-top:2px">Usato per le voci col prezzo cliente vuoto (prezzo = costo + margine).</div></section>';
+  const cli = '<section class="card"><div class="ch"><h2>Preventivo cliente</h2></div>' +
     '<div class="blk" style="justify-content:space-between"><span>Imponibile</span><b id="prevImp">' + eur2(T.imp) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between;align-items:center"><span>Sconto ' + inp('sconto', d.sconto || 0) + ' %</span><b id="prevSconto">− ' + eur2(T.sconto) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between"><span>Imponibile netto</span><b id="prevNetto">' + eur2(T.netto) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between;align-items:center"><span>IVA ' + inp('iva', d.iva) + ' %</span><b id="prevIva">' + eur2(T.iva) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between;font-size:18px;border-top:2px solid var(--ln);padding-top:8px"><b>Totale</b><b id="prevTot">' + eur2(T.tot) + '</b></div>' +
-    '<div class="small muted" id="prevMarg" style="text-align:right;margin-top:4px">Margine effettivo ' + T.margineEff + '%</div></section>';
+    (cliView ? '' : '<div class="small muted" id="prevMarg" style="text-align:right;margin-top:4px">Margine effettivo ' + T.margineEff + '%</div>') + '</section>';
   const cond = card('Condizioni', pfld('N° offerta', '<input type="text" value="' + esc(offNum(o)) + '" disabled style="max-width:220px;background:#f3f3f3">', true) + pfld('Riferimento interno (facoltativo)', '<input type="text" data-in="prevTop" data-k="riferimento" value="' + esc(d.riferimento || '') + '" placeholder="es. vostro protocollo / ordine" style="max-width:220px">', true) + pfld('Validità (giorni)', '<input type="number" inputmode="numeric" data-in="prevTop" data-k="validitaGiorni" value="' + esc(d.validitaGiorni != null ? d.validitaGiorni : 30) + '" style="max-width:140px">', true) + pfld('Anticipo all’ordine %', '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="antic" value="' + esc(d.antic != null ? d.antic : '') + '" style="max-width:120px">', true) + pfld('A metà lavori %', '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="meta" value="' + esc(d.meta != null ? d.meta : '') + '" style="max-width:120px">', true) + pfld('Saldo %', '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="saldo" value="' + esc(d.saldo != null ? d.saldo : '') + '" style="max-width:120px">', true) + pfld('Testo introduttivo (in alto nel PDF)', '<textarea data-in="prevTop" data-k="intro" rows="3">' + esc(d.intro || '') + '</textarea>', false) + pfld('Note e condizioni (in fondo al PDF)', '<textarea data-in="prevTop" data-k="note" rows="3" placeholder="Es. Modalità di pagamento, tempi di consegna, esclusioni…">' + esc(d.note || '') + '</textarea>', false));
   const docs = card('Documenti dell’offerta (sopralluogo, foto, progetti, bollette, planimetrie…)', ((o.documenti || []).map((dc) => docRow(dc, o)).join('') || '<div class="empty" style="margin:4px 0">Nessun documento allegato.</div>'), '<button class="btn p sm" data-a="prevDocNew" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">+ Documento</button>');
   const actions = '<div class="row" style="flex-wrap:wrap"><button class="btn p" data-a="prevSave" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Salva preventivo</button><button class="btn" data-a="prevPdf" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">PDF offerta</button><button class="btn p" data-a="prevInvia" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Invia offerta al cliente</button><button class="btn" data-a="prevConferma" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Conferma d’ordine</button><button class="btn" data-a="listinoParam">Prezzi fissi</button></div>' + (o.commessaId && G('commesse', o.commessaId) ? '<p class="small muted" style="margin-top:8px">Offerta collegata alla commessa ' + esc(G('commesse', o.commessaId).codice) + '.</p>' : '<div class="row" style="margin-top:8px"><button class="btn" data-a="prevAccetta" data-id="' + esc(c.id) + '" data-x="' + esc(o.id) + '">Offerta accettata → crea commessa</button></div>');
   const noteBox = o.note ? '<section class="card" style="background:#fff7e0;border:1px solid #e6cf7a"><div class="small" style="font-weight:700;margin-bottom:4px;color:#8a6d1a">Note dell’offerta</div><div style="white-space:pre-wrap">' + esc(o.note) + '</div></section>' : '';
-  return '<div class="hd"><div><button class="lnk" data-a="goRef" data-r="cliente" data-id="' + esc(c.id) + '">← ' + esc(c.ragioneSociale) + '</button><h1 style="margin-top:8px">Preventivo</h1><p class="sub">' + esc(o.titolo || 'Offerta') + '</p></div></div><div class="stack">' + noteBox + card('Voci (costi)', rows, '') + card('Aggiungi voce', add) + costi + cli + cond + docs + actions + '</div>';
+  return '<div class="hd"><div><button class="lnk" data-a="goRef" data-r="cliente" data-id="' + esc(c.id) + '">← ' + esc(c.ragioneSociale) + '</button><h1 style="margin-top:8px">Preventivo</h1><p class="sub">' + esc(o.titolo || 'Offerta') + '</p></div></div><div class="stack">' + noteBox + righeCard + costi + cli + cond + docs + actions + '</div>';
 }
 function prevRecalc() {
-  const d = S.prev; if (!d) return;
-  (d.voci || []).forEach((v) => { const ec = document.getElementById('pcost_' + v.id); if (ec) ec.textContent = eur2(calcVoce(v, d)); const el = document.getElementById('pcli_' + v.id); if (el) el.textContent = eur2(clientPriceOf(v, d)); });
+  const d = S.prev; if (!d) return; migraPrev(d);
+  (d.voci || []).forEach((v) => { const ec = document.getElementById('pcost_' + v.id); if (ec) ec.textContent = eur2(rigaCosto(v)); const el = document.getElementById('pcli_' + v.id); if (el) el.textContent = eur2(rigaCliente(v, d)); });
   const T = prevTotals(d), set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = eur2(val); };
   set('prevCosti', T.costi); set('prevImp', T.imp); set('prevNetto', T.netto); set('prevIva', T.iva); set('prevTot', T.tot);
   const es = document.getElementById('prevSconto'); if (es) es.textContent = '− ' + eur2(T.sconto);
@@ -1689,11 +1735,37 @@ function prevRecalc() {
 I.prevEdit = (ds, val) => { const v = S.prev && S.prev.voci[+ds.vi]; if (!v) return; v[ds.k] = val; prevRecalc(); };
 I.prevChk = (ds, val, el) => { const v = S.prev && S.prev.voci[+ds.vi]; if (!v) return; v[ds.k] = !!(el && el.checked); queueRender(); };
 I.prevTop = (ds, val) => { if (S.prev) { S.prev[ds.k] = val; prevRecalc(); } };
+I.prevCliView = (ds, val, el) => { S.prevCli = !!(el && el.checked); queueRender(); };
 C.prevMezzo = (ds, val) => { const v = S.prev && S.prev.voci[+ds.vi]; if (!v) return; v.mezzoId = val; const m = G('mezzi', val), dd = cd(), a = (m && m.alimentazione || '').toLowerCase(); if (m) { if (m.consumo) v.consumo = m.consumo; else if (dd[a + 'Consumo'] != null) v.consumo = dd[a + 'Consumo']; if (dd[a + 'Prezzo'] != null) v.prezzo = dd[a + 'Prezzo']; } queueRender(); };
-A.prevAdd = (d) => { if (S.prev) { S.prev.voci.push(nuovaVoce(d.t)); queueRender(); } };
-/* Riga aggiunta dal "Preventivo al cliente": è solo lato cliente (soloCliente), non compare tra
-   "I miei costi" e non ha costo; il suo prezzo entra nel totale e conta tutto come margine. */
-A.prevAddCli = () => { if (S.prev) { const v = nuovaVoce('ALTRO'); v.soloCliente = true; S.prev.voci.push(v); queueRender(); } };
+A.prevAddRiga = () => { if (S.prev) { migraPrev(S.prev); S.prev.voci.push(nuovaRiga()); queueRender(); } };
+A.prevAddListino = () => {
+  if (!S.prev) return; migraPrev(S.prev);
+  const sel = document.getElementById('prevPick'), it = sel && sel.value !== '' ? listinoCat()[+sel.value] : null;
+  if (!it) { toast('Scegli prima una voce dal listino.'); return; }
+  S.prev.voci.push(nuovaRiga({ nome: it.nome, um: it.um || '', q: 1, cu: num(it.cu), pu: (it.pu !== '' && it.pu != null) ? num(it.pu) : '', descrEstesa: it.descr || '' }));
+  queueRender();
+};
+/* ---- Listino prezzi (catalogo voci ricorrenti) ---- */
+A.listinoCat = () => {
+  const items = listinoCat();
+  const rowsH = items.length ? items.map((it, j) => '<div class="blk" style="justify-content:space-between;align-items:center;gap:8px"><div style="flex:1;min-width:0"><b>' + esc(it.nome) + '</b>' + (it.um ? ' <span class="small muted">' + esc(it.um) + '</span>' : '') + '<div class="small muted">costo ' + eur2(it.cu) + ' · cliente ' + (it.pu !== '' && it.pu != null ? eur2(it.pu) : 'auto') + '</div></div><button class="btn sm" data-a="listinoCatDel" data-j="' + j + '">Togli</button></div>').join('') : '<div class="empty">Listino vuoto. Aggiungi la prima voce qui sotto.</div>';
+  openModal('<h2 style="margin-top:0">Listino prezzi</h2><p class="small muted" style="margin-top:0">Voci ricorrenti con costo e prezzo cliente, da usare nei preventivi con un clic.</p>' + rowsH +
+    '<div class="fgrid" style="margin-top:12px"><div class="fld" style="flex:1 1 100%"><label>Nuova voce</label><input id="lc_nome" placeholder="es. Split 12000 BTU"></div><div class="fld half"><label>Unità</label><input id="lc_um" placeholder="pz, m, giorno"></div><div class="fld half"><label>Costo €</label><input id="lc_cu" type="number" step="any" inputmode="decimal"></div><div class="fld half"><label>Prezzo cliente € (vuoto = auto)</label><input id="lc_pu" type="number" step="any" inputmode="decimal"></div><div class="fld" style="flex:1 1 100%"><label>Descrizione (facoltativa)</label><textarea id="lc_descr" rows="2"></textarea></div></div>' +
+    '<div class="row" style="flex-wrap:wrap;gap:8px"><button class="btn" data-a="close">Chiudi</button><button class="btn p" data-a="listinoCatAdd">+ Aggiungi al listino</button></div>', true);
+};
+A.listinoCatAdd = async () => {
+  const g = (id) => document.getElementById(id), nome = (g('lc_nome').value || '').trim();
+  if (!nome) { toast('Scrivi il nome della voce.'); return; }
+  const items = clone(listinoCat());
+  items.push({ id: uid(), nome: nome, um: (g('lc_um').value || '').trim(), cu: num(g('lc_cu').value), pu: g('lc_pu').value === '' ? '' : num(g('lc_pu').value), descr: (g('lc_descr').value || '').trim() });
+  try { await listinoCatSave(items); toast('Voce aggiunta al listino.'); } catch (e) { toast('Salvataggio non riuscito.', 'err'); }
+  queueRender(); A.listinoCat();
+};
+A.listinoCatDel = async (d) => {
+  const items = clone(listinoCat()); items.splice(+d.j, 1);
+  try { await listinoCatSave(items); } catch (e) { toast('Salvataggio non riuscito.', 'err'); }
+  queueRender(); A.listinoCat();
+};
 A.prevDel = (d) => { if (S.prev) { S.prev.voci.splice(+d.i, 1); queueRender(); } };
 A.prevSpec = (d) => { const v = S.prev && S.prev.voci[+d.vi]; if (!v) return; v.descrEstesa = specDefault(v); queueRender(); };
 A.prevOpen = (d) => { const c = G('clienti', d.id); if (!c) return; const o = (c.offerte || []).find((x) => x.id === d.x); if (!o) { toast('Offerta non trovata.', 'err'); return; } S.prev = Object.assign(nuovoPrev(), clone(o.preventivo || {})); go('preventivo', d.id, d.x); };
@@ -1715,8 +1787,8 @@ function voceDescr(v) {
   return { base: base, det: det };
 }
 function preventivoHtml(c, o) {
-  const a = az(), d = S.prev || o.preventivo || nuovoPrev(), T = prevTotals(d);
-  const righe = d.voci.filter((v) => v.inPrev !== false).map((v) => { const dd = voceDescr(v); return '<tr><td style="padding:8px 10px;border-bottom:1px solid #e3e3e3"><b>' + esc(dd.base) + '</b>' + (dd.det ? '<div style="font-size:11px;color:#666;margin-top:2px">' + esc(dd.det) + '</div>' : '') + (v.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(v.descrEstesa) + '</div>' : '') + '</td><td style="padding:8px 10px;border-bottom:1px solid #e3e3e3;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(clientPriceOf(v, d)) + '</td></tr>'; }).join('');
+  const a = az(), d = migraPrev(S.prev || clone(o.preventivo || nuovoPrev())), T = prevTotals(d);
+  const righe = clientLines(d).map((x) => '<tr><td style="padding:8px 10px;border-bottom:1px solid #e3e3e3"><b>' + esc(x.nome || '—') + '</b>' + (x.um && num(x.q) ? '<div style="font-size:11px;color:#666;margin-top:2px">' + esc(num(x.q) + ' ' + x.um) + '</div>' : '') + (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') + '</td><td style="padding:8px 10px;border-bottom:1px solid #e3e3e3;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>').join('');
   const inteR = [a.indirizzo, ['Tel. ' + a.telefono, a.fax ? 'Fax ' + a.fax : ''].filter(Boolean).join(' · '), [a.email, a.web].filter(Boolean).join(' · '), a.piva ? 'P.IVA ' + a.piva : ''].filter(Boolean).map((x) => '<div style="font-size:10.5px;color:#555">' + esc(x) + '</div>').join('');
   return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1b1f23;max-width:760px;margin:0 auto">' +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1b1f23;padding-bottom:10px;margin-bottom:16px"><div><img src="' + LOGO_IE + '" alt="i-energy" style="height:54px;display:block;margin-bottom:6px">' + inteR + '</div><div style="text-align:right"><img src="' + TUV_IE + '" alt="certificazioni" style="height:40px;display:block;margin:0 0 8px auto"><div style="font-size:22px;font-weight:800;letter-spacing:1px;color:#1b1f23">OFFERTA</div>' + (offNum(o) ? '<div style="font-size:12px;color:#555">n° ' + esc(offNum(o)) + '</div>' : '') + (d.riferimento ? '<div style="font-size:11px;color:#888">Rif. ' + esc(d.riferimento) + '</div>' : '') + '<div style="font-size:12px;color:#555">' + esc(fmtD(o.data || today())) + '</div></div></div>' +
@@ -1766,8 +1838,8 @@ function confArticoliHtml(d, a) {
     '</div>';
 }
 function confermaHtml(c, o) {
-  const a = az(), d = o.preventivo || nuovoPrev(), T = prevTotals(d);
-  const righe = d.voci.filter((v) => v.inPrev !== false).map((v) => { const dd = voceDescr(v); return '<tr><td style="padding:7px 9px;border:1px solid #cfcfcf"><b>' + esc(dd.base) + '</b>' + (dd.det ? '<div style="font-size:11px;color:#666">' + esc(dd.det) + '</div>' : '') + (v.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(v.descrEstesa) + '</div>' : '') + '</td><td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(clientPriceOf(v, d)) + '</td></tr>'; }).join('');
+  const a = az(), d = migraPrev(clone(o.preventivo || nuovoPrev())), T = prevTotals(d);
+  const righe = clientLines(d).map((x) => '<tr><td style="padding:7px 9px;border:1px solid #cfcfcf"><b>' + esc(x.nome || '—') + '</b>' + (x.um && num(x.q) ? '<div style="font-size:11px;color:#666">' + esc(num(x.q) + ' ' + x.um) + '</div>' : '') + (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') + '</td><td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>').join('');
   const totRow = (l, v, bold) => '<tr><td style="padding:7px 9px;border:1px solid #cfcfcf' + (bold ? ';font-weight:700' : '') + '">' + l + '</td><td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap' + (bold ? ';font-weight:700' : '') + '">' + eur2(v) + '</td></tr>';
   return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1b1f23;max-width:760px;margin:0 auto">' + confHeaderHtml(a) +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px"><div style="font-size:15px"><b>Conferma d’ordine:</b> n° ' + esc(confNum(o)) + '</div><div style="text-align:right;font-size:12px"><div style="font-weight:700">Spett.le ' + esc(c.ragioneSociale) + '</div>' + [[c.indirizzo].filter(Boolean).join(''), [c.citta, c.provincia ? '(' + c.provincia + ')' : ''].filter(Boolean).join(' ')].filter(Boolean).map((x) => '<div style="color:#555">' + esc(x) + '</div>').join('') + '</div></div>' +
