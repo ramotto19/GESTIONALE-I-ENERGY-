@@ -1653,7 +1653,7 @@ function vPreventivo() {
   const o = (c.offerte || []).find((x) => x.id === S.tab); if (!o) return '<div class="empty">Offerta non trovata. <button class="lnk" data-a="goRef" data-r="cliente" data-id="' + esc(c.id) + '">Torna al cliente</button></div>';
   if (!S.prev) S.prev = Object.assign(nuovoPrev(), clone(o.preventivo || {}));
   const d = S.prev, T = prevTotals(d);
-  const rows = d.voci.map((v, i) => voceCard(v, i, d)).join('') || '<div class="empty" style="margin:4px 0">Nessuna voce. Aggiungi la prima qui sotto.</div>';
+  const rows = d.voci.map((v, i) => v.soloCliente ? '' : voceCard(v, i, d)).join('') || '<div class="empty" style="margin:4px 0">Nessuna voce. Aggiungi la prima qui sotto.</div>';
   const add = '<div class="row" style="flex-wrap:wrap;gap:6px">' + PREV_TIPI.map((t) => '<button class="btn sm" data-a="prevAdd" data-t="' + t[0] + '">+ ' + esc(t[1]) + '</button>').join('') + '</div>';
   const inp = (k, val, w) => '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="' + k + '" value="' + esc(val) + '" style="width:' + (w || 62) + 'px;display:inline-block;padding:4px 6px">';
   const costi = '<section class="card"><div class="ch"><h2>I miei costi <span class="small muted">(riservato)</span></h2></div><div class="blk" style="justify-content:space-between"><span>Totale costi</span><b id="prevCosti">' + eur2(T.costi) + '</b></div><div class="blk" style="justify-content:space-between;align-items:center"><span>Margine predefinito ' + inp('margine', d.margine) + ' %</span><b id="prevUtile">utile ' + eur2(T.utile) + '</b></div><div class="small muted" style="margin-top:2px">Usato per le voci senza un margine proprio. Imposta il margine della singola voce nella sua scheda costo.</div></section>';
@@ -1662,7 +1662,7 @@ function vPreventivo() {
     '<div class="row" style="justify-content:space-between;align-items:center;margin:6px 0 2px"><span class="small muted">Descrizione estesa (sotto la voce nel PDF)</span>' + (specDefault(v) ? '<button class="btn sm" data-a="prevSpec" data-vi="' + i + '">Standard</button>' : '') + '</div>' +
     '<textarea data-in="prevEdit" data-vi="' + i + '" data-k="descrEstesa" rows="2" placeholder="Dettagli, marche, garanzie, inclusioni…" style="width:100%">' + esc(v.descrEstesa || '') + '</textarea>' +
     '</div>').join('') || '<div class="empty" style="margin:4px 0">Nessuna voce inclusa nel preventivo.</div>';
-  const cli = '<section class="card"><div class="ch"><h2>Preventivo al cliente</h2><div class="row"><button class="btn sm" data-a="prevAdd" data-t="ALTRO">+ Riga</button></div></div>' +
+  const cli = '<section class="card"><div class="ch"><h2>Preventivo al cliente</h2><div class="row"><button class="btn sm" data-a="prevAddCli">+ Riga</button></div></div>' +
     '<div style="margin-bottom:6px">' + cliLines + '</div>' +
     '<div class="small muted" style="margin-bottom:10px">Descrizione e prezzo come li vede il cliente. Prezzo vuoto = automatico (costo + margine).</div>' +
     '<div class="blk" style="justify-content:space-between"><span>Imponibile</span><b id="prevImp">' + eur2(T.imp) + '</b></div>' +
@@ -1691,6 +1691,9 @@ I.prevChk = (ds, val, el) => { const v = S.prev && S.prev.voci[+ds.vi]; if (!v) 
 I.prevTop = (ds, val) => { if (S.prev) { S.prev[ds.k] = val; prevRecalc(); } };
 C.prevMezzo = (ds, val) => { const v = S.prev && S.prev.voci[+ds.vi]; if (!v) return; v.mezzoId = val; const m = G('mezzi', val), dd = cd(), a = (m && m.alimentazione || '').toLowerCase(); if (m) { if (m.consumo) v.consumo = m.consumo; else if (dd[a + 'Consumo'] != null) v.consumo = dd[a + 'Consumo']; if (dd[a + 'Prezzo'] != null) v.prezzo = dd[a + 'Prezzo']; } queueRender(); };
 A.prevAdd = (d) => { if (S.prev) { S.prev.voci.push(nuovaVoce(d.t)); queueRender(); } };
+/* Riga aggiunta dal "Preventivo al cliente": è solo lato cliente (soloCliente), non compare tra
+   "I miei costi" e non ha costo; il suo prezzo entra nel totale e conta tutto come margine. */
+A.prevAddCli = () => { if (S.prev) { const v = nuovaVoce('ALTRO'); v.soloCliente = true; S.prev.voci.push(v); queueRender(); } };
 A.prevDel = (d) => { if (S.prev) { S.prev.voci.splice(+d.i, 1); queueRender(); } };
 A.prevSpec = (d) => { const v = S.prev && S.prev.voci[+d.vi]; if (!v) return; v.descrEstesa = specDefault(v); queueRender(); };
 A.prevOpen = (d) => { const c = G('clienti', d.id); if (!c) return; const o = (c.offerte || []).find((x) => x.id === d.x); if (!o) { toast('Offerta non trovata.', 'err'); return; } S.prev = Object.assign(nuovoPrev(), clone(o.preventivo || {})); go('preventivo', d.id, d.x); };
