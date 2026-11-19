@@ -2555,11 +2555,16 @@ function apriRiga(u, m, id, d) {
       const nr = { id: r ? r.id : newId('ore'), t: v.tipo || 'L', d: v.d, i: v.i, u: v.u, p: Math.max(0, Math.round(num(v.p))), tr: Math.max(0, Math.round(num(v.tr))), o: num(v.o), c: v.cx || v.c || '', a: v.a, eo: hasEolo ? eoObj : null };
       if (nr.t !== 'L') { nr.i = ''; nr.u = ''; nr.p = 0; nr.tr = 0; nr.eo = null; } else nr.o = 0;
       if (nr.d.slice(0, 7) !== m) throw { vmsg: 'La data deve essere in ' + meseLabel(m) + '. Cambia mese con le frecce.' };
-      const altre = righe.filter((x) => !r || x.id !== r.id), msg = validaRiga(nr, altre);
+      /* le altre righe si rileggono da capo al salvataggio (non dalla copia presa quando si è
+         aperto il modulo): senza, se nel frattempo arrivava un aggiornamento — l'altra riga
+         registrata dal telefono, o il controllo periodico che rilegge le ore — il salvataggio
+         riscriveva l'elenco vecchio e faceva sparire quella modifica (stesso bug già corretto
+         per gli altri elenchi dentro un documento, vedi editSub). */
+      const altre = righeOf(u, m).filter((x) => !r || x.id !== r.id), msg = validaRiga(nr, altre);
       if (msg) throw { vmsg: msg };
       await saveRighe(u, m, altre.concat([nr]));
     },
-    onDelete: r ? async () => { await saveRighe(u, m, righe.filter((x) => x.id !== r.id)); } : null
+    onDelete: r ? async () => { await saveRighe(u, m, righeOf(u, m).filter((x) => x.id !== r.id)); } : null
   });
 }
 A.oreNew = (d) => apriRiga(d.u, d.m, null, d.d);
