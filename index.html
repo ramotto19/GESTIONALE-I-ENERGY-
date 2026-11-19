@@ -1689,9 +1689,40 @@ function voceRigaCard(v, i, d) {
   '</div>';
 }
 /* anteprima "vista cliente": solo ciò che vede il cliente (voci incluse spalmate, niente costi). */
+/* form a tabella (come l'anteprima): una riga per voce + pannello descrizione sotto, scorrevole su mobile. */
+function voceRigaTable(d) {
+  const style = '<style>.prevwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--ln);border-radius:10px}'
+    + '.prevtbl{width:100%;border-collapse:collapse;font-size:13px;min-width:760px}'
+    + '.prevtbl th{font-size:10px;text-transform:uppercase;letter-spacing:.3px;text-align:left;padding:7px 8px;border-bottom:1px solid var(--ln);opacity:.6;white-space:nowrap}'
+    + '.prevtbl th.n{text-align:right}.prevtbl td{padding:6px 8px;border-bottom:1px solid var(--ln);vertical-align:middle}.prevtbl td.n{text-align:right}'
+    + '.prevtbl input{width:100%;padding:5px 7px;box-sizing:border-box}.prevtbl input.nm{min-width:150px}.prevtbl td.n input{text-align:right;min-width:70px;max-width:120px}'
+    + '.prevtbl .drow td{padding-top:0}.prevtbl .drow textarea{width:100%;box-sizing:border-box;padding:6px 8px}'
+    + '.prevtbl .xb{border:0;background:transparent;font-size:16px;cursor:pointer;padding:2px 6px;color:inherit;opacity:.6}'
+    + '.prevtbl .incl{display:flex;gap:6px;align-items:flex-start;font-size:12px;opacity:.85;margin-top:6px;cursor:pointer}'
+    + '.prevtbl .hint{font-size:11.5px;opacity:.7;margin-top:4px}</style>';
+  const head = '<thead><tr><th>Voce</th><th class="n">Q.tà</th><th>Um</th><th class="n">Costo un.</th><th class="n">Prezzo un.</th><th class="n">Costo</th><th class="n">Al cliente</th><th></th></tr></thead>';
+  const g = (v, i, k, type, ph, cls) => '<input type="' + (type || 'text') + '"' + (type === 'number' ? ' step="any" inputmode="decimal"' : '') + ' data-in="prevEdit" data-vi="' + i + '" data-k="' + k + '" value="' + esc(v[k]) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + (cls ? ' class="' + cls + '"' : '') + '>';
+  const body = d.voci.map((v, i) => {
+    const hint = v.scaglioni ? '<div class="hint">Costo €/kW automatico dalla potenza (modificabile a mano).' + (v.cuAuto === false ? ' <button class="btn sm" data-a="prevCuAuto" data-i="' + i + '">Torna automatico</button>' : '') + '</div>' : '';
+    return '<tr>' +
+      '<td>' + g(v, i, 'nome', 'text', 'Voce (es. cavi, split…)', 'nm') + '</td>' +
+      '<td class="n">' + g(v, i, 'q', 'number', v.scaglioni ? 'kW' : 'q') + '</td>' +
+      '<td>' + g(v, i, 'um', 'text', v.scaglioni ? 'kW' : 'pz') + '</td>' +
+      '<td class="n">' + g(v, i, 'cu', 'number', v.scaglioni ? '€/kW' : '') + '</td>' +
+      '<td class="n"><input type="number" step="any" inputmode="decimal" data-in="prevEdit" data-vi="' + i + '" data-k="pu" value="' + esc(v.pu) + '" placeholder="auto ' + esc(eur2(rigaPrezzoU(v, d))) + '"></td>' +
+      '<td class="n" id="pcost_' + v.id + '">' + eur2(rigaCosto(v)) + '</td>' +
+      '<td class="n"><b id="pcli_' + v.id + '">' + eur2(rigaCliente(v, d)) + '</b></td>' +
+      '<td class="n"><button class="xb" data-a="prevDel" data-i="' + i + '" aria-label="Togli">×</button></td>' +
+      '</tr>' +
+      '<tr class="drow"><td colspan="8"><textarea data-in="prevEdit" data-vi="' + i + '" data-k="descrEstesa" rows="2" placeholder="Descrizione estesa (sotto la voce nel PDF cliente)">' + esc(v.descrEstesa || '') + '</textarea><label class="incl"><input type="checkbox" data-in="prevChk" data-vi="' + i + '" data-k="incluso"' + (v.incluso ? ' checked' : '') + ' style="width:auto"> <span>Includi nelle altre voci: non la mostra al cliente come riga separata, il prezzo si spalma sulle altre (utile per la manodopera).</span></label>' + hint + '</td></tr>';
+  }).join('');
+  return style + '<div class="prevwrap"><table class="prevtbl">' + head + '<tbody>' + body + '</tbody></table></div>';
+}
+/* etichetta quantità per PDF/vista cliente: niente se q=1 (es. "1 pz", "1 giorno") o se le quantità sono disattivate. */
+function qtaLabel(d, x) { return (d && d.mostraQta !== false && x.um && num(x.q) && num(x.q) !== 1) ? (num(x.q) + ' ' + x.um) : ''; }
 function cliPreviewHtml(d) {
   const lines = clientLines(d);
-  return lines.length ? lines.map((x) => '<div style="border-bottom:1px solid var(--ln);padding:8px 0"><div class="row" style="justify-content:space-between;gap:8px;align-items:baseline"><b>' + esc(x.nome || '—') + (x.um && num(x.q) ? ' <span class="muted" style="font-weight:400;font-size:12px">' + esc(num(x.q) + ' ' + x.um) + '</span>' : '') + '</b><b>' + eur2(x.importo) + '</b></div>' + (x.descrEstesa ? '<div class="small muted" style="white-space:pre-wrap;margin-top:2px">' + esc(x.descrEstesa) + '</div>' : '') + '</div>').join('') : '<div class="empty" style="margin:4px 0">Nessuna voce inclusa nel preventivo.</div>';
+  return lines.length ? lines.map((x) => { const q = qtaLabel(d, x); return '<div style="border-bottom:1px solid var(--ln);padding:8px 0"><div class="row" style="justify-content:space-between;gap:8px;align-items:baseline"><b>' + esc(x.nome || '—') + (q ? ' <span class="muted" style="font-weight:400;font-size:12px">' + esc(q) + '</span>' : '') + '</b><b>' + eur2(x.importo) + '</b></div>' + (x.descrEstesa ? '<div class="small muted" style="white-space:pre-wrap;margin-top:2px">' + esc(x.descrEstesa) + '</div>' : '') + '</div>'; }).join('') : '<div class="empty" style="margin:4px 0">Nessuna voce inclusa nel preventivo.</div>';
 }
 function voceCard(v, i, d) {
   const n = (k, label, ph, half) => pfld(label, '<input type="number" step="any" inputmode="decimal" data-in="prevEdit" data-vi="' + i + '" data-k="' + k + '" value="' + esc(v[k]) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + '>', half !== false);
@@ -1722,11 +1753,12 @@ function vPreventivo() {
   const cat = listinoCat();
   const pick = '<select id="prevPick"><option value="">— scegli dal listino —</option>' + cat.map((it, j) => '<option value="' + j + '">' + esc(it.nome) + (it.um ? ' (' + esc(it.um) + ')' : '') + '</option>').join('') + '</select>';
   const add = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px">' + pick + '<button class="btn sm p" data-a="prevAddListino">+ Dal listino</button><button class="btn sm" data-a="prevAddRiga">+ Riga libera</button><button class="btn sm" data-a="listinoCat">Gestisci listino</button></div>';
-  const rows = cliView ? cliPreviewHtml(d) : (d.voci.length ? d.voci.map((v, i) => voceRigaCard(v, i, d)).join('') : '<div class="empty" style="margin:4px 0">Nessuna voce. Aggiungi la prima dal listino o come riga libera.</div>');
+  const rows = cliView ? cliPreviewHtml(d) : (d.voci.length ? voceRigaTable(d) : '<div class="empty" style="margin:4px 0">Nessuna voce. Aggiungi la prima dal listino o come riga libera.</div>');
   const righeCard = '<section class="card"><div class="ch"><h2>Righe del preventivo</h2><label class="row" style="gap:6px;align-items:center;font-size:13px;cursor:pointer;margin:0"><input type="checkbox" data-in="prevCliView"' + (cliView ? ' checked' : '') + ' style="width:auto;margin:0"> Vista cliente</label></div>' + (cliView ? '' : add) + rows + '</section>';
   const inp = (k, val, w) => '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="' + k + '" value="' + esc(val) + '" style="width:' + (w || 62) + 'px;display:inline-block;padding:4px 6px">';
   const costi = cliView ? '' : '<section class="card"><div class="ch"><h2>I miei costi <span class="small muted">(riservato)</span></h2></div><div class="blk" style="justify-content:space-between"><span>Totale costi</span><b id="prevCosti">' + eur2(T.costi) + '</b></div><div class="blk" style="justify-content:space-between;align-items:center"><span>Margine predefinito ' + inp('margine', d.margine) + ' %</span><b id="prevUtile">utile ' + eur2(T.utile) + '</b></div><div class="small muted" style="margin-top:2px">Usato per le voci col prezzo cliente vuoto (prezzo = costo + margine).</div></section>';
   const cli = '<section class="card"><div class="ch"><h2>Preventivo cliente</h2></div>' +
+    '<label class="row" style="gap:6px;align-items:center;font-size:13px;margin-bottom:10px;cursor:pointer"><input type="checkbox" data-in="prevTopChk" data-k="mostraQta"' + (d.mostraQta !== false ? ' checked' : '') + ' style="width:auto;margin:0"> Mostra le quantità nel PDF cliente (le quantità “1” non vengono mai scritte)</label>' +
     '<div class="blk" style="justify-content:space-between"><span>Imponibile</span><b id="prevImp">' + eur2(T.imp) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between;align-items:center"><span>Sconto ' + inp('sconto', d.sconto || 0) + ' %</span><b id="prevSconto">− ' + eur2(T.sconto) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between"><span>Imponibile netto</span><b id="prevNetto">' + eur2(T.netto) + '</b></div>' +
@@ -1762,6 +1794,7 @@ A.prevCuAuto = (d) => { const v = S.prev && S.prev.voci[+d.i]; if (!v || !v.scag
 I.prevChk = (ds, val, el) => { const v = S.prev && S.prev.voci[+ds.vi]; if (!v) return; v[ds.k] = !!(el && el.checked); queueRender(); };
 I.prevTop = (ds, val) => { if (S.prev) { S.prev[ds.k] = val; prevRecalc(); } };
 I.prevCliView = (ds, val, el) => { S.prevCli = !!(el && el.checked); queueRender(); };
+I.prevTopChk = (ds, val, el) => { if (S.prev) { S.prev[ds.k] = !!(el && el.checked); queueRender(); } };
 C.prevMezzo = (ds, val) => { const v = S.prev && S.prev.voci[+ds.vi]; if (!v) return; v.mezzoId = val; const m = G('mezzi', val), dd = cd(), a = (m && m.alimentazione || '').toLowerCase(); if (m) { if (m.consumo) v.consumo = m.consumo; else if (dd[a + 'Consumo'] != null) v.consumo = dd[a + 'Consumo']; if (dd[a + 'Prezzo'] != null) v.prezzo = dd[a + 'Prezzo']; } queueRender(); };
 A.prevAddRiga = () => { if (S.prev) { migraPrev(S.prev); S.prev.voci.push(nuovaRiga()); queueRender(); } };
 A.prevAddListino = () => {
@@ -1853,7 +1886,7 @@ function voceDescr(v) {
 }
 function preventivoHtml(c, o) {
   const a = az(), d = migraPrev(S.prev || clone(o.preventivo || nuovoPrev())), T = prevTotals(d);
-  const righe = clientLines(d).map((x) => '<tr><td style="padding:8px 10px;border-bottom:1px solid #e3e3e3"><b>' + esc(x.nome || '—') + '</b>' + (x.um && num(x.q) ? '<div style="font-size:11px;color:#666;margin-top:2px">' + esc(num(x.q) + ' ' + x.um) + '</div>' : '') + (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') + '</td><td style="padding:8px 10px;border-bottom:1px solid #e3e3e3;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>').join('');
+  const righe = clientLines(d).map((x) => { const q = qtaLabel(d, x); return '<tr><td style="padding:8px 10px;border-bottom:1px solid #e3e3e3"><b>' + esc(x.nome || '—') + '</b>' + (q ? '<div style="font-size:11px;color:#666;margin-top:2px">' + esc(q) + '</div>' : '') + (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') + '</td><td style="padding:8px 10px;border-bottom:1px solid #e3e3e3;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>'; }).join('');
   const inteR = [a.indirizzo, ['Tel. ' + a.telefono, a.fax ? 'Fax ' + a.fax : ''].filter(Boolean).join(' · '), [a.email, a.web].filter(Boolean).join(' · '), a.piva ? 'P.IVA ' + a.piva : ''].filter(Boolean).map((x) => '<div style="font-size:10.5px;color:#555">' + esc(x) + '</div>').join('');
   return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1b1f23;max-width:760px;margin:0 auto">' +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1b1f23;padding-bottom:10px;margin-bottom:16px"><div><img src="' + LOGO_IE + '" alt="i-energy" style="height:54px;display:block;margin-bottom:6px">' + inteR + '</div><div style="text-align:right"><img src="' + TUV_IE + '" alt="certificazioni" style="height:40px;display:block;margin:0 0 8px auto"><div style="font-size:22px;font-weight:800;letter-spacing:1px;color:#1b1f23">OFFERTA</div>' + (offNum(o) ? '<div style="font-size:12px;color:#555">n° ' + esc(offNum(o)) + '</div>' : '') + (d.riferimento ? '<div style="font-size:11px;color:#888">Rif. ' + esc(d.riferimento) + '</div>' : '') + '<div style="font-size:12px;color:#555">' + esc(fmtD(o.data || today())) + '</div></div></div>' +
@@ -1904,7 +1937,7 @@ function confArticoliHtml(d, a) {
 }
 function confermaHtml(c, o) {
   const a = az(), d = migraPrev(clone(o.preventivo || nuovoPrev())), T = prevTotals(d);
-  const righe = clientLines(d).map((x) => '<tr><td style="padding:7px 9px;border:1px solid #cfcfcf"><b>' + esc(x.nome || '—') + '</b>' + (x.um && num(x.q) ? '<div style="font-size:11px;color:#666">' + esc(num(x.q) + ' ' + x.um) + '</div>' : '') + (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') + '</td><td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>').join('');
+  const righe = clientLines(d).map((x) => { const q = qtaLabel(d, x); return '<tr><td style="padding:7px 9px;border:1px solid #cfcfcf"><b>' + esc(x.nome || '—') + '</b>' + (q ? '<div style="font-size:11px;color:#666">' + esc(q) + '</div>' : '') + (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') + '</td><td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>'; }).join('');
   const totRow = (l, v, bold) => '<tr><td style="padding:7px 9px;border:1px solid #cfcfcf' + (bold ? ';font-weight:700' : '') + '">' + l + '</td><td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap' + (bold ? ';font-weight:700' : '') + '">' + eur2(v) + '</td></tr>';
   return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1b1f23;max-width:760px;margin:0 auto">' + confHeaderHtml(a) +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px"><div style="font-size:15px"><b>Conferma d’ordine:</b> n° ' + esc(confNum(o)) + '</div><div style="text-align:right;font-size:12px"><div style="font-weight:700">Spett.le ' + esc(c.ragioneSociale) + '</div>' + [[c.indirizzo].filter(Boolean).join(''), [c.citta, c.provincia ? '(' + c.provincia + ')' : ''].filter(Boolean).join(' ')].filter(Boolean).map((x) => '<div style="color:#555">' + esc(x) + '</div>').join('') + '</div></div>' +
