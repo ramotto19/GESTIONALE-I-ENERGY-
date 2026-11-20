@@ -1718,11 +1718,31 @@ function voceRigaTable(d) {
   }).join('');
   return style + '<div class="prevwrap"><table class="prevtbl">' + head + '<tbody>' + body + '</tbody></table></div>';
 }
-/* etichetta quantità per PDF/vista cliente: niente se q=1 (es. "1 pz", "1 giorno") o se le quantità sono disattivate. */
-function qtaLabel(d, x) { return (d && d.mostraQta !== false && x.um && num(x.q) && num(x.q) !== 1) ? (num(x.q) + ' ' + x.um) : ''; }
+/* etichetta quantità per PDF/vista cliente.
+   - mostraQta===false → nasconde sempre le quantità.
+   - mostraQta===true  → mostra SEMPRE q+um, anche se q=1.
+   - mostraQta non impostato (default) → mostra solo se q!=1 (vecchio comportamento). */
+function qtaLabel(d, x) {
+  if (!d || !x.um || !num(x.q)) return '';
+  if (d.mostraQta === false) return '';
+  if (d.mostraQta === true) return num(x.q) + ' ' + x.um;
+  /* default: nasconde q=1 */
+  return num(x.q) !== 1 ? (num(x.q) + ' ' + x.um) : '';
+}
 function cliPreviewHtml(d) {
   const lines = clientLines(d);
-  return lines.length ? lines.map((x) => { const q = qtaLabel(d, x); return '<div style="border-bottom:1px solid var(--ln);padding:8px 0"><div class="row" style="justify-content:space-between;gap:8px;align-items:baseline"><b>' + esc(x.nome || '—') + (q ? ' <span class="muted" style="font-weight:400;font-size:12px">' + esc(q) + '</span>' : '') + '</b><b>' + eur2(x.importo) + '</b></div>' + (x.descrEstesa ? '<div class="small muted" style="white-space:pre-wrap;margin-top:2px">' + esc(x.descrEstesa) + '</div>' : '') + '</div>'; }).join('') : '<div class="empty" style="margin:4px 0">Nessuna voce inclusa nel preventivo.</div>';
+  if (!lines.length) return '<div class="empty" style="margin:4px 0">Nessuna voce inclusa nel preventivo.</div>';
+  return lines.map((x) => {
+    const q = qtaLabel(d, x);
+    const pu = (d.mostraPrezzoU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) + '/' + x.um : '';
+    const sub = [q, pu].filter(Boolean).join(' · ');
+    return '<div style="border-bottom:1px solid var(--ln);padding:8px 0">' +
+      '<div class="row" style="justify-content:space-between;gap:8px;align-items:baseline">' +
+      '<b>' + esc(x.nome || '—') + (sub ? ' <span class="muted" style="font-weight:400;font-size:12px">' + esc(sub) + '</span>' : '') + '</b>' +
+      '<b>' + eur2(x.importo) + '</b></div>' +
+      (x.descrEstesa ? '<div class="small muted" style="white-space:pre-wrap;margin-top:2px">' + esc(x.descrEstesa) + '</div>' : '') +
+      '</div>';
+  }).join('');
 }
 function voceCard(v, i, d) {
   const n = (k, label, ph, half) => pfld(label, '<input type="number" step="any" inputmode="decimal" data-in="prevEdit" data-vi="' + i + '" data-k="' + k + '" value="' + esc(v[k]) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + '>', half !== false);
@@ -1757,8 +1777,9 @@ function vPreventivo() {
   const righeCard = '<section class="card"><div class="ch"><h2>Righe del preventivo</h2><label class="row" style="gap:6px;align-items:center;font-size:13px;cursor:pointer;margin:0"><input type="checkbox" data-in="prevCliView"' + (cliView ? ' checked' : '') + ' style="width:auto;margin:0"> Vista cliente</label></div>' + (cliView ? '' : add) + rows + '</section>';
   const inp = (k, val, w) => '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="' + k + '" value="' + esc(val) + '" style="width:' + (w || 62) + 'px;display:inline-block;padding:4px 6px">';
   const costi = cliView ? '' : '<section class="card"><div class="ch"><h2>I miei costi <span class="small muted">(riservato)</span></h2></div><div class="blk" style="justify-content:space-between"><span>Totale costi</span><b id="prevCosti">' + eur2(T.costi) + '</b></div><div class="blk" style="justify-content:space-between;align-items:center"><span>Margine predefinito ' + inp('margine', d.margine) + ' %</span><b id="prevUtile">utile ' + eur2(T.utile) + '</b></div><div class="small muted" style="margin-top:2px">Usato per le voci col prezzo cliente vuoto (prezzo = costo + margine).</div></section>';
-  const cli = '<section class="card"><div class="ch"><h2>Preventivo cliente</h2></div>' +
-    '<label class="row" style="gap:6px;align-items:center;font-size:13px;margin-bottom:10px;cursor:pointer"><input type="checkbox" data-in="prevTopChk" data-k="mostraQta"' + (d.mostraQta !== false ? ' checked' : '') + ' style="width:auto;margin:0"> Mostra le quantità nel PDF cliente (le quantità “1” non vengono mai scritte)</label>' +
+  const cli = '<section class=”card”><div class=”ch”><h2>Preventivo cliente</h2></div>' +
+    '<label class=”row” style=”gap:6px;align-items:center;font-size:13px;margin-bottom:6px;cursor:pointer”><input type=”checkbox” data-in=”prevTopChk” data-k=”mostraQta”' + (d.mostraQta === true ? ' checked' : '') + ' style=”width:auto;margin:0”> Mostra le quantità nel PDF cliente</label>' +
+    '<label class=”row” style=”gap:6px;align-items:center;font-size:13px;margin-bottom:10px;cursor:pointer”><input type=”checkbox” data-in=”prevTopChk” data-k=”mostraPrezzoU”' + (d.mostraPrezzoU ? ' checked' : '') + ' style=”width:auto;margin:0”> Mostra il prezzo unitario nel PDF cliente</label>' +
     '<div class="blk" style="justify-content:space-between"><span>Imponibile</span><b id="prevImp">' + eur2(T.imp) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between;align-items:center"><span>Sconto ' + inp('sconto', d.sconto || 0) + ' %</span><b id="prevSconto">− ' + eur2(T.sconto) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between"><span>Imponibile netto</span><b id="prevNetto">' + eur2(T.netto) + '</b></div>' +
@@ -1886,14 +1907,29 @@ function voceDescr(v) {
 }
 function preventivoHtml(c, o) {
   const a = az(), d = migraPrev(S.prev || clone(o.preventivo || nuovoPrev())), T = prevTotals(d);
-  const righe = clientLines(d).map((x) => { const q = qtaLabel(d, x); return '<tr><td style="padding:8px 10px;border-bottom:1px solid #e3e3e3"><b>' + esc(x.nome || '—') + '</b>' + (q ? '<div style="font-size:11px;color:#666;margin-top:2px">' + esc(q) + '</div>' : '') + (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') + '</td><td style="padding:8px 10px;border-bottom:1px solid #e3e3e3;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>'; }).join('');
+  const showPU = !!d.mostraPrezzoU;
+  const righe = clientLines(d).map((x) => {
+    const q = qtaLabel(d, x);
+    const puStr = (showPU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) : '';
+    return '<tr>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #e3e3e3"><b>' + esc(x.nome || '—') + '</b>' +
+      (q ? '<div style="font-size:11px;color:#666;margin-top:2px">' + esc(q) + '</div>' : '') +
+      (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') +
+      '</td>' +
+      (showPU ? '<td style="padding:8px 10px;border-bottom:1px solid #e3e3e3;text-align:right;white-space:nowrap;vertical-align:top;color:#555;font-size:12px">' + (puStr ? esc(puStr) + '/' + esc(x.um) : '') + '</td>' : '') +
+      '<td style="padding:8px 10px;border-bottom:1px solid #e3e3e3;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>';
+  }).join('');
   const inteR = [a.indirizzo, ['Tel. ' + a.telefono, a.fax ? 'Fax ' + a.fax : ''].filter(Boolean).join(' · '), [a.email, a.web].filter(Boolean).join(' · '), a.piva ? 'P.IVA ' + a.piva : ''].filter(Boolean).map((x) => '<div style="font-size:10.5px;color:#555">' + esc(x) + '</div>').join('');
   return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1b1f23;max-width:760px;margin:0 auto">' +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1b1f23;padding-bottom:10px;margin-bottom:16px"><div><img src="' + LOGO_IE + '" alt="i-energy" style="height:54px;display:block;margin-bottom:6px">' + inteR + '</div><div style="text-align:right"><img src="' + TUV_IE + '" alt="certificazioni" style="height:40px;display:block;margin:0 0 8px auto"><div style="font-size:22px;font-weight:800;letter-spacing:1px;color:#1b1f23">OFFERTA</div>' + (offNum(o) ? '<div style="font-size:12px;color:#555">n° ' + esc(offNum(o)) + '</div>' : '') + (d.riferimento ? '<div style="font-size:11px;color:#888">Rif. ' + esc(d.riferimento) + '</div>' : '') + '<div style="font-size:12px;color:#555">' + esc(fmtD(o.data || today())) + '</div></div></div>' +
     '<div style="margin-bottom:12px"><div style="font-size:11px;color:#888;text-transform:uppercase">Spett.le</div><div style="font-size:15px;font-weight:700">' + esc(c.ragioneSociale) + '</div>' + [[c.indirizzo, c.citta, c.provincia].filter(Boolean).join(', '), c.piva ? 'P.IVA ' + c.piva : ''].filter(Boolean).map((x) => '<div style="font-size:12px;color:#555">' + esc(x) + '</div>').join('') + '</div>' +
     (d.intro ? '<div style="font-size:12.5px;color:#333;margin-bottom:12px;line-height:1.4">' + esc(d.intro) + '</div>' : '') +
     (o.titolo ? '<div style="font-size:15px;font-weight:700;margin-bottom:8px">' + esc(o.titolo) + '</div>' : '') +
-    '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left;padding:8px 10px;background:#1b1f23;color:#fff">Prodotti e servizi</th><th style="text-align:right;padding:8px 10px;background:#1b1f23;color:#fff;white-space:nowrap">Totale</th></tr></thead><tbody>' + righe + '</tbody></table>' +
+    '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>' +
+    '<th style="text-align:left;padding:8px 10px;background:#1b1f23;color:#fff">Prodotti e servizi</th>' +
+    (showPU ? '<th style="text-align:right;padding:8px 10px;background:#1b1f23;color:#fff;white-space:nowrap">Prezzo un.</th>' : '') +
+    '<th style="text-align:right;padding:8px 10px;background:#1b1f23;color:#fff;white-space:nowrap">Totale</th>' +
+    '</tr></thead><tbody>' + righe + '</tbody></table>' +
     '<div style="margin-top:14px;margin-left:auto;width:280px;font-size:13px"><div style="display:flex;justify-content:space-between;padding:4px 0"><span>Imponibile</span><b>' + eur2(T.imp) + '</b></div>' +
     (num(d.sconto) ? '<div style="display:flex;justify-content:space-between;padding:4px 0"><span>Sconto ' + num(d.sconto) + '%</span><b>− ' + eur2(T.sconto) + '</b></div><div style="display:flex;justify-content:space-between;padding:4px 0"><span>Imponibile netto</span><b>' + eur2(T.netto) + '</b></div>' : '') +
     '<div style="display:flex;justify-content:space-between;padding:4px 0"><span>IVA ' + num(d.iva) + '%</span><b>' + eur2(T.iva) + '</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #1b1f23;font-size:16px"><b>Totale</b><b>' + eur2(T.tot) + '</b></div></div>' +
@@ -1937,12 +1973,27 @@ function confArticoliHtml(d, a) {
 }
 function confermaHtml(c, o) {
   const a = az(), d = migraPrev(clone(o.preventivo || nuovoPrev())), T = prevTotals(d);
-  const righe = clientLines(d).map((x) => { const q = qtaLabel(d, x); return '<tr><td style="padding:7px 9px;border:1px solid #cfcfcf"><b>' + esc(x.nome || '—') + '</b>' + (q ? '<div style="font-size:11px;color:#666">' + esc(q) + '</div>' : '') + (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') + '</td><td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>'; }).join('');
+  const showPU = !!d.mostraPrezzoU;
+  const righe = clientLines(d).map((x) => {
+    const q = qtaLabel(d, x);
+    const puStr = (showPU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) : '';
+    return '<tr>' +
+      '<td style="padding:7px 9px;border:1px solid #cfcfcf"><b>' + esc(x.nome || '—') + '</b>' +
+      (q ? '<div style="font-size:11px;color:#666">' + esc(q) + '</div>' : '') +
+      (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') +
+      '</td>' +
+      (showPU ? '<td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap;vertical-align:top;color:#555;font-size:12px">' + (puStr ? esc(puStr) + '/' + esc(x.um) : '') + '</td>' : '') +
+      '<td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>';
+  }).join('');
   const totRow = (l, v, bold) => '<tr><td style="padding:7px 9px;border:1px solid #cfcfcf' + (bold ? ';font-weight:700' : '') + '">' + l + '</td><td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap' + (bold ? ';font-weight:700' : '') + '">' + eur2(v) + '</td></tr>';
   return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1b1f23;max-width:760px;margin:0 auto">' + confHeaderHtml(a) +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px"><div style="font-size:15px"><b>Conferma d’ordine:</b> n° ' + esc(confNum(o)) + '</div><div style="text-align:right;font-size:12px"><div style="font-weight:700">Spett.le ' + esc(c.ragioneSociale) + '</div>' + [[c.indirizzo].filter(Boolean).join(''), [c.citta, c.provincia ? '(' + c.provincia + ')' : ''].filter(Boolean).join(' ')].filter(Boolean).map((x) => '<div style="color:#555">' + esc(x) + '</div>').join('') + '</div></div>' +
     '<div style="font-size:12.5px;color:#222;margin-bottom:12px;line-height:1.4">' + esc(CONF_INTRO) + '</div>' +
-    '<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr><th style="text-align:left;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff">Prodotti e servizi</th><th style="text-align:right;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff">Totale</th></tr></thead><tbody>' + righe +
+    '<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr>' +
+    '<th style="text-align:left;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff">Prodotti e servizi</th>' +
+    (showPU ? '<th style="text-align:right;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff;white-space:nowrap">Prezzo un.</th>' : '') +
+    '<th style="text-align:right;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff">Totale</th>' +
+    '</tr></thead><tbody>' + righe +
     totRow('Totale imponibile', T.imp) + (num(d.sconto) ? totRow('Sconto ' + num(d.sconto) + '%', -T.sconto) + totRow('Imponibile netto', T.netto) : '') + totRow('IVA ' + num(d.iva) + '%', T.iva) + totRow('Totale complessivo', T.tot, true) + '</tbody></table>' +
     confArticoliHtml(d, a) + '</div>';
 }
