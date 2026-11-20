@@ -1732,14 +1732,16 @@ function qtaLabel(d, x) {
 function cliPreviewHtml(d) {
   const lines = clientLines(d);
   if (!lines.length) return '<div class="empty" style="margin:4px 0">Nessuna voce inclusa nel preventivo.</div>';
+  const showQ = d.mostraQta === true;
+  const showPU = !!d.mostraPrezzoU;
   return lines.map((x) => {
-    const q = qtaLabel(d, x);
-    const pu = (d.mostraPrezzoU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) + '/' + x.um : '';
-    const sub = [q, pu].filter(Boolean).join(' · ');
+    const qStr = (showQ && x.um && num(x.q)) ? num(x.q) + ' ' + x.um : '';
+    const puStr = (showPU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) + '/' + x.um : '';
+    const sub = [qStr, puStr].filter(Boolean).join(' · ');
     return '<div style="border-bottom:1px solid var(--ln);padding:8px 0">' +
-      '<div class="row" style="justify-content:space-between;gap:8px;align-items:baseline">' +
-      '<b>' + esc(x.nome || '—') + (sub ? ' <span class="muted" style="font-weight:400;font-size:12px">' + esc(sub) + '</span>' : '') + '</b>' +
-      '<b>' + eur2(x.importo) + '</b></div>' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">' +
+      '<div><b>' + esc(x.nome || '—') + '</b>' + (sub ? '<div class="small muted" style="margin-top:1px">' + esc(sub) + '</div>' : '') + '</div>' +
+      '<b style="white-space:nowrap">' + eur2(x.importo) + '</b></div>' +
       (x.descrEstesa ? '<div class="small muted" style="white-space:pre-wrap;margin-top:2px">' + esc(x.descrEstesa) + '</div>' : '') +
       '</div>';
   }).join('');
@@ -1907,17 +1909,19 @@ function voceDescr(v) {
 }
 function preventivoHtml(c, o) {
   const a = az(), d = migraPrev(S.prev || clone(o.preventivo || nuovoPrev())), T = prevTotals(d);
+  const showQ = d.mostraQta === true;
   const showPU = !!d.mostraPrezzoU;
+  const tdB = 'border-bottom:1px solid #e3e3e3';
   const righe = clientLines(d).map((x) => {
-    const q = qtaLabel(d, x);
-    const puStr = (showPU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) : '';
+    const qStr = (showQ && x.um && num(x.q)) ? num(x.q) + ' ' + x.um : '';
+    const puStr = (showPU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) + '/' + x.um : '';
     return '<tr>' +
-      '<td style="padding:8px 10px;border-bottom:1px solid #e3e3e3"><b>' + esc(x.nome || '—') + '</b>' +
-      (q ? '<div style="font-size:11px;color:#666;margin-top:2px">' + esc(q) + '</div>' : '') +
+      '<td style="padding:8px 10px;' + tdB + '"><b>' + esc(x.nome || '—') + '</b>' +
       (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') +
       '</td>' +
-      (showPU ? '<td style="padding:8px 10px;border-bottom:1px solid #e3e3e3;text-align:right;white-space:nowrap;vertical-align:top;color:#555;font-size:12px">' + (puStr ? esc(puStr) + '/' + esc(x.um) : '') + '</td>' : '') +
-      '<td style="padding:8px 10px;border-bottom:1px solid #e3e3e3;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>';
+      (showQ ? '<td style="padding:8px 10px;' + tdB + ';text-align:right;white-space:nowrap;vertical-align:top;color:#555;font-size:12px">' + esc(qStr) + '</td>' : '') +
+      (showPU ? '<td style="padding:8px 10px;' + tdB + ';text-align:right;white-space:nowrap;vertical-align:top;color:#555;font-size:12px">' + esc(puStr) + '</td>' : '') +
+      '<td style="padding:8px 10px;' + tdB + ';text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>';
   }).join('');
   const inteR = [a.indirizzo, ['Tel. ' + a.telefono, a.fax ? 'Fax ' + a.fax : ''].filter(Boolean).join(' · '), [a.email, a.web].filter(Boolean).join(' · '), a.piva ? 'P.IVA ' + a.piva : ''].filter(Boolean).map((x) => '<div style="font-size:10.5px;color:#555">' + esc(x) + '</div>').join('');
   return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1b1f23;max-width:760px;margin:0 auto">' +
@@ -1927,6 +1931,7 @@ function preventivoHtml(c, o) {
     (o.titolo ? '<div style="font-size:15px;font-weight:700;margin-bottom:8px">' + esc(o.titolo) + '</div>' : '') +
     '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>' +
     '<th style="text-align:left;padding:8px 10px;background:#1b1f23;color:#fff">Prodotti e servizi</th>' +
+    (showQ ? '<th style="text-align:right;padding:8px 10px;background:#1b1f23;color:#fff;white-space:nowrap">Q.tà</th>' : '') +
     (showPU ? '<th style="text-align:right;padding:8px 10px;background:#1b1f23;color:#fff;white-space:nowrap">Prezzo un.</th>' : '') +
     '<th style="text-align:right;padding:8px 10px;background:#1b1f23;color:#fff;white-space:nowrap">Totale</th>' +
     '</tr></thead><tbody>' + righe + '</tbody></table>' +
@@ -1973,17 +1978,19 @@ function confArticoliHtml(d, a) {
 }
 function confermaHtml(c, o) {
   const a = az(), d = migraPrev(clone(o.preventivo || nuovoPrev())), T = prevTotals(d);
+  const showQ = d.mostraQta === true;
   const showPU = !!d.mostraPrezzoU;
+  const tdC = 'border:1px solid #cfcfcf';
   const righe = clientLines(d).map((x) => {
-    const q = qtaLabel(d, x);
-    const puStr = (showPU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) : '';
+    const qStr = (showQ && x.um && num(x.q)) ? num(x.q) + ' ' + x.um : '';
+    const puStr = (showPU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) + '/' + x.um : '';
     return '<tr>' +
-      '<td style="padding:7px 9px;border:1px solid #cfcfcf"><b>' + esc(x.nome || '—') + '</b>' +
-      (q ? '<div style="font-size:11px;color:#666">' + esc(q) + '</div>' : '') +
+      '<td style="padding:7px 9px;' + tdC + '"><b>' + esc(x.nome || '—') + '</b>' +
       (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') +
       '</td>' +
-      (showPU ? '<td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap;vertical-align:top;color:#555;font-size:12px">' + (puStr ? esc(puStr) + '/' + esc(x.um) : '') + '</td>' : '') +
-      '<td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>';
+      (showQ ? '<td style="padding:7px 9px;' + tdC + ';text-align:right;white-space:nowrap;vertical-align:top;color:#555;font-size:12px">' + esc(qStr) + '</td>' : '') +
+      (showPU ? '<td style="padding:7px 9px;' + tdC + ';text-align:right;white-space:nowrap;vertical-align:top;color:#555;font-size:12px">' + esc(puStr) + '</td>' : '') +
+      '<td style="padding:7px 9px;' + tdC + ';text-align:right;white-space:nowrap;vertical-align:top">' + eur2(x.importo) + '</td></tr>';
   }).join('');
   const totRow = (l, v, bold) => '<tr><td style="padding:7px 9px;border:1px solid #cfcfcf' + (bold ? ';font-weight:700' : '') + '">' + l + '</td><td style="padding:7px 9px;border:1px solid #cfcfcf;text-align:right;white-space:nowrap' + (bold ? ';font-weight:700' : '') + '">' + eur2(v) + '</td></tr>';
   return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1b1f23;max-width:760px;margin:0 auto">' + confHeaderHtml(a) +
@@ -1991,6 +1998,7 @@ function confermaHtml(c, o) {
     '<div style="font-size:12.5px;color:#222;margin-bottom:12px;line-height:1.4">' + esc(CONF_INTRO) + '</div>' +
     '<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr>' +
     '<th style="text-align:left;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff">Prodotti e servizi</th>' +
+    (showQ ? '<th style="text-align:right;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff;white-space:nowrap">Q.tà</th>' : '') +
     (showPU ? '<th style="text-align:right;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff;white-space:nowrap">Prezzo un.</th>' : '') +
     '<th style="text-align:right;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff">Totale</th>' +
     '</tr></thead><tbody>' + righe +
@@ -3482,6 +3490,12 @@ document.addEventListener('change', (e) => {
   Promise.resolve().then(() => C[t.dataset.c](t.dataset, t.value, t, e)).catch((err) => console.warn(err));
 });
 document.addEventListener('input', (e) => {
+  const t = e.target.closest ? e.target.closest('[data-in]') : null;
+  if (t && I[t.dataset.in]) I[t.dataset.in](t.dataset, t.value, t);
+});
+/* i checkbox non emettono 'input', solo 'change' */
+document.addEventListener('change', (e) => {
+  if (e.target.type !== 'checkbox') return;
   const t = e.target.closest ? e.target.closest('[data-in]') : null;
   if (t && I[t.dataset.in]) I[t.dataset.in](t.dataset, t.value, t);
 });
