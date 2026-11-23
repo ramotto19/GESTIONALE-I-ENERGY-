@@ -1864,12 +1864,12 @@ function vPreventivo() {
   /* ---- AREA INTERNA (riservata): costi a categorie, stesse regole della commessa. ---- */
   const costHead = '<thead><tr><th>Voce di costo</th><th>Tipo</th><th class="n">Importo</th><th></th></tr></thead>';
   const costBody = (d.costi || []).map((v, i) =>
-    '<tr data-a="pCostEdit" data-i="' + i + '" style="cursor:pointer"><td><b>' + esc(v.descrizione || lab(CAT_COSTO, v.categoria || 'PEDAGGI')) + '</b>' + (v.data ? '<div class="small muted">' + esc(fmtD(v.data)) + '</div>' : '') + '</td>'
-    + '<td>' + stBadge(CAT_COSTO, v.categoria || 'PEDAGGI') + '</td>'
+    '<tr data-a="pCostEdit" data-i="' + i + '" style="cursor:pointer"><td><b>' + esc(v.descrizione || labCostoPrev(v.categoria || 'PEDAGGI')) + '</b>' + (v.data ? '<div class="small muted">' + esc(fmtD(v.data)) + '</div>' : '') + '</td>'
+    + '<td>' + badgeCostoPrev(v.categoria || 'PEDAGGI') + '</td>'
     + '<td class="n">' + eur2(costoImporto(v)) + '</td>'
     + '<td class="n"><button class="xb" data-a="pCostDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>').join('');
-  const costTable = (d.costi && d.costi.length) ? '<div class="prevwrap"><table class="prevtbl">' + costHead + '<tbody>' + costBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessun costo. Aggiungi i tuoi costi (anche una sola riga "Fattura fornitore" per i materiali).</div>';
-  const addCost = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0">' + CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="pCostNew" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '') + '</div>';
+  const costTable = (d.costi && d.costi.length) ? '<div class="prevwrap"><table class="prevtbl">' + costHead + '<tbody>' + costBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessun costo. Aggiungi i tuoi costi (anche una sola riga "Preventivo fornitore" per i materiali).</div>';
+  const addCost = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0">' + CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="pCostNew" data-cat="' + k[0] + '">+ ' + esc(labCostoPrev(k[0])) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '') + '</div>';
   const addCostList = cat.length ? '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 0"><span class="small muted">Dal listino:</span><select id="prevPickCostoListino"><option value="">— scegli —</option>' + cat.map((it, j) => '<option value="' + j + '">' + esc(it.nome) + (it.um ? ' (' + esc(it.um) + ')' : '') + '</option>').join('') + '</select><button class="btn sm" data-a="pCostAddListino">+ Dal listino</button><button class="btn sm" data-a="listinoCat">Gestisci listino</button></div>' : '';
   const riepInterno = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px">'
     + metrica('Totale costi', eur2(T.costi), 'prevCosti')
@@ -1923,7 +1923,17 @@ function prevRecalc() {
   const rm = document.getElementById('prevRicMed'); if (rm) rm.textContent = T.ricMed + '%';
   const cp = document.getElementById('prevCliPrev'); if (cp) cp.innerHTML = cliPreviewHtml(d);
 }
-/* ---- Costi del preventivo (area riservata): stesse categorie e regole della commessa ---- */
+/* ---- Costi del preventivo (area riservata): stesse categorie e regole della commessa ----
+   Nel preventivo la fattura del fornitore non esiste ancora: la categoria FORNITORE si mostra
+   come "Preventivo fornitore" (diventa "Fattura fornitore" nella commessa, dove si collega alla
+   fattura vera). */
+const labCostoPrev = (cat) => cat === 'FORNITORE' ? 'Preventivo fornitore' : lab(CAT_COSTO, cat);
+const badgeCostoPrev = (cat) => cat === 'FORNITORE' ? bd('Preventivo fornitore', tone(CAT_COSTO, 'FORNITORE')) : stBadge(CAT_COSTO, cat);
+/* campi del form costo nel contesto preventivo: per FORNITORE niente "n. fattura/data fattura". */
+function costoFieldsPrev(cat, c) {
+  if (cat === 'FORNITORE') return [{ k: 'fornitore', l: 'Fornitore', req: true, half: true }, { k: 'numeroFattura', l: 'Riferimento offerta (facoltativo)', half: true }, { k: 'descrizione', l: 'Descrizione', req: true }, { k: 'data', l: 'Data', t: 'date', half: true }, { k: 'importo', l: 'Importo (€)', t: 'number', req: true, half: true }, { k: 'file', l: 'Preventivo / offerta del fornitore (file)', t: 'file' }];
+  return costoFields(cat, c);
+}
 function prevCostoForm(cat, i, preset) {
   if (!S.prev) return; migraPrev(S.prev);
   const c = G('clienti', S.id), nuovo = i == null || i === '', d = cd();
@@ -1937,7 +1947,7 @@ function prevCostoForm(cat, i, preset) {
   /* solo per voci nuove: opzione per generare subito anche la riga al cliente, col ricarico. */
   const extra = nuovo ? [{ k: '_addCli', l: 'Aggiungi anche al preventivo cliente', t: 'checkbox' }, { k: '_ricCli', l: 'Ricarico cliente %', t: 'number', half: true, def: d.ricaricoCliente, hint: 'Prezzo cliente = costo × (1 + ricarico).' }] : [];
   openForm({
-    title: lab(CAT_COSTO, cat), fields: costoFields(cat, c || {}).concat(extra), values: cur,
+    title: labCostoPrev(cat), fields: costoFieldsPrev(cat, c || {}).concat(extra), values: cur,
     folder: c ? ['Clienti', c.ragioneSociale, 'Offerte e preventivi', 'Costi interni'] : undefined,
     onSave: async (v) => {
       const addCli = !!v._addCli, ric = num(v._ricCli);
