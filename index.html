@@ -58,6 +58,19 @@ h3{font:600 15px/1.3 'IBM Plex Sans',sans-serif;margin:0}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .zint{background:#241C16;border-color:#4A3626}:root:not([data-theme="light"]) .zcli{background:#15211A;border-color:#2C4A37}}
 :root[data-theme="dark"] .zint{background:#241C16;border-color:#4A3626}
 :root[data-theme="dark"] .zcli{background:#15211A;border-color:#2C4A37}
+.prevwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--ln);border-radius:10px;background:var(--pn)}
+.prevtbl{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
+.prevtbl th{font-size:10px;text-transform:uppercase;letter-spacing:.3px;text-align:left;padding:7px 8px;border-bottom:1px solid var(--ln);opacity:.6;white-space:nowrap}
+.prevtbl th.n{text-align:right}
+.prevtbl td{padding:6px 8px;border-bottom:1px solid var(--ln);vertical-align:middle}
+.prevtbl td.n{text-align:right}
+.prevtbl input{width:100%;padding:5px 7px;box-sizing:border-box}
+.prevtbl input.nm{min-width:150px}
+.prevtbl td.n input{text-align:right;min-width:70px;max-width:120px}
+.prevtbl .drow td{padding-top:0}
+.prevtbl .drow textarea{width:100%;box-sizing:border-box;padding:6px 8px}
+.prevtbl .xb{border:0;background:transparent;font-size:16px;cursor:pointer;padding:2px 6px;color:inherit;opacity:.6}
+.prevtbl .incl{display:flex;gap:6px;align-items:flex-start;font-size:12px;opacity:.85;margin-top:6px;cursor:pointer}
 .kpi .l{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mu)}
 .kpi .v{font:700 36px/1 'Barlow Condensed',sans-serif}
 .kpi .n{font-size:13px;color:var(--mu)}
@@ -1647,12 +1660,32 @@ function migraVoce(v, d) {
   const um = v.tipo === 'MATERIALI' ? 'pz' : v.tipo === 'MANODOPERA' ? 'giorno' : v.tipo === 'VIAGGI' ? 'viaggio' : '';
   return nuovaRiga({ id: v.id || uid(), nome: v.descrizione || lab(PREV_TIPI, v.tipo) || 'Voce', um: um, q: 1, cu: v.soloCliente ? 0 : cost, pu: cli, descrEstesa: v.descrEstesa || '', inPrev: v.inPrev !== false });
 }
-function migraPrev(d) { if (d && !d._rig) { const orig = d.voci || []; d.voci = orig.map((v) => migraVoce(v, { voci: orig, margine: d.margine })); d._rig = true; } return d; }
+/* Migrazione in due passi:
+   _rig: le vecchie voci tipizzate (FV, MATERIALI…) diventano righe generiche con costo e prezzo.
+   _v2: si separano in DUE liste indipendenti — d.costi (i miei costi) e d.cliente (righe mostrate
+        al cliente). Da qui in poi non sono più collegate riga per riga: cancellare o aggiungere
+        da una parte non tocca l'altra. Il prezzo cliente viene "congelato" al valore di allora
+        (prima era costo + ricarico), così resta indipendente dai costi. */
+function migraPrev(d) {
+  if (!d) return d;
+  if (!d._rig) { const orig = d.voci || []; d.voci = orig.map((v) => migraVoce(v, { voci: orig, margine: d.margine })); d._rig = true; }
+  if (!d._v2) {
+    const vs = d.voci || [];
+    d.costi = vs.map((v) => ({ id: uid(), nome: v.nome || 'Voce', um: v.um || '', q: num(v.q) || 1, cu: (v.cu === '' || v.cu == null) ? '' : num(v.cu) }));
+    d.cliente = vs.filter((v) => v.inPrev !== false).map((v) => ({ id: uid(), nome: v.nome || 'Voce', um: v.um || '', q: num(v.q) || 1, pu: rigaPrezzoU(v, d), descrEstesa: v.descrEstesa || '', incluso: !!v.incluso, inPrev: true }));
+    d._v2 = true;
+  }
+  if (!d.costi) d.costi = [];
+  if (!d.cliente) d.cliente = [];
+  return d;
+}
+function costoRiga(v) { return r2(num(v.q) * num(v.cu)); }
+function clienteRiga(v) { return r2(num(v.q) * num(v.pu)); }
 /* righe come le vede il cliente: le voci "incluse" spariscono e il loro importo si spalma sulle altre. */
 function clientLines(d) {
   migraPrev(d);
   const vis = []; let folded = 0, visBase = 0;
-  (d.voci || []).forEach((v) => { if (v.inPrev === false) return; const imp = rigaCliente(v, d); if (v.incluso) { folded += imp; } else { vis.push({ v: v, imp: imp }); visBase += imp; } });
+  (d.cliente || []).forEach((v) => { if (v.inPrev === false) return; const imp = clienteRiga(v); if (v.incluso) { folded += imp; } else { vis.push({ v: v, imp: imp }); visBase += imp; } });
   const k = visBase > 0 ? (visBase + folded) / visBase : 1;
   return vis.map((x) => ({ nome: x.v.nome, um: x.v.um, q: x.v.q, descrEstesa: x.v.descrEstesa, importo: r2(x.imp * k) }));
 }
@@ -1671,8 +1704,8 @@ function nuovaVoce(tipo) {
 function nuovoPrev() { return { voci: [], margine: ld().margine, iva: ld().iva, sconto: 0, validitaGiorni: 30, antic: 30, meta: 40, saldo: 30, riferimento: '', intro: INTRO_DEF, note: '' }; }
 const prevTotals = (d) => {
   migraPrev(d);
-  const costi = r2((d.voci || []).reduce((s, v) => s + rigaCosto(v), 0));
-  const imp = r2((d.voci || []).filter((v) => v.inPrev !== false).reduce((s, v) => s + rigaCliente(v, d), 0));
+  const costi = r2((d.costi || []).reduce((s, v) => s + costoRiga(v), 0));
+  const imp = r2((d.cliente || []).filter((v) => v.inPrev !== false).reduce((s, v) => s + clienteRiga(v), 0));
   const sconto = r2(imp * num(d.sconto) / 100), netto = r2(imp - sconto), iva = r2(netto * num(d.iva) / 100);
   const utile = r2(netto - costi), margineEff = netto > 0 ? Math.round(utile / netto * 1000) / 10 : 0;
   const ricMed = costi > 0 ? Math.round((netto / costi - 1) * 1000) / 10 : 0;
@@ -1781,27 +1814,45 @@ function vPreventivo() {
   const d = migraPrev(S.prev), T = prevTotals(d);
   const cliView = !!S.prevCli;
   const cat = listinoCat();
-  const pick = '<select id="prevPick"><option value="">— scegli dal listino —</option>' + cat.map((it, j) => '<option value="' + j + '">' + esc(it.nome) + (it.um ? ' (' + esc(it.um) + ')' : '') + '</option>').join('') + '</select>';
   const inp = (k, val, w) => '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="' + k + '" value="' + esc(val) + '" style="width:' + (w || 62) + 'px;display:inline-block;padding:4px 6px">';
-  /* ---- AREA INTERNA (riservata): righe con costo/ricarico + riepilogo interno. Nascosta in "Vista cliente". ---- */
   const metrica = (label, val, id) => '<div class="mcard"><div class="small muted" style="margin-bottom:2px">' + esc(label) + '</div><b id="' + id + '" style="font-size:15px">' + val + '</b></div>';
-  const righeTable = d.voci.length ? voceRigaTable(d) : '<div class="empty" style="margin:4px 0">Nessuna voce. Aggiungi la prima dal listino o come riga libera.</div>';
+  const optCat = (idSel) => '<select id="' + idSel + '"><option value="">— dal listino —</option>' + cat.map((it, j) => '<option value="' + j + '">' + esc(it.nome) + (it.um ? ' (' + esc(it.um) + ')' : '') + '</option>').join('') + '</select>';
+  /* ---- AREA INTERNA (riservata): lista costi indipendente + riepilogo. Nascosta in "Vista cliente". ---- */
+  const costHead = '<thead><tr><th>Voce di costo</th><th class="n">Q.tà</th><th>Um</th><th class="n">Costo un.</th><th class="n">Costo riga</th><th></th></tr></thead>';
+  const costBody = (d.costi || []).map((v, i) =>
+    '<tr><td><input class="nm" data-in="costEdit" data-i="' + i + '" data-k="nome" value="' + esc(v.nome) + '" placeholder="Es. Materiali (fattura), Manodopera…"></td>'
+    + '<td class="n"><input data-in="costEdit" data-i="' + i + '" data-k="q" value="' + esc(v.q) + '"></td>'
+    + '<td><input data-in="costEdit" data-i="' + i + '" data-k="um" value="' + esc(v.um) + '" placeholder="pz"></td>'
+    + '<td class="n"><input data-in="costEdit" data-i="' + i + '" data-k="cu" value="' + esc(v.cu) + '"></td>'
+    + '<td class="n" id="cst_' + v.id + '">' + eur2(costoRiga(v)) + '</td>'
+    + '<td class="n"><button class="xb" data-a="costDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>').join('');
+  const costTable = (d.costi && d.costi.length) ? '<div class="prevwrap"><table class="prevtbl">' + costHead + '<tbody>' + costBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessun costo. Aggiungi le tue voci di costo (anche una sola riga "Materiali" da fattura).</div>';
+  const addCost = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0"><span class="small muted">Aggiungi un costo:</span>' + optCat('prevPickCosto') + '<button class="btn sm p" data-a="costAddListino">+ Dal listino</button><button class="btn sm" data-a="costAdd">+ Riga costo</button></div>';
   const riepInterno = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px">'
     + metrica('Totale costi', eur2(T.costi), 'prevCosti')
     + metrica('Utile stimato', eur2(T.utile), 'prevUtile')
     + metrica('Margine effettivo', T.margineEff + '%', 'prevMargEff')
     + metrica('Ricarico medio', T.ricMed + '%', 'prevRicMed')
-    + '</div>'
-    + '<div class="blk" style="justify-content:space-between;align-items:center;margin-top:10px"><span>Ricarico predefinito ' + inp('margine', d.margine) + ' %</span><span class="small muted">Usato per le righe col prezzo cliente vuoto: prezzo = costo × (1 + ricarico).</span></div>';
+    + '</div><div class="small muted" style="margin-top:6px">Confronto fra il totale dei tuoi costi e l’imponibile del preventivo cliente. Le due liste sono indipendenti.</div>';
   const zonaInterna = cliView ? '' : '<section class="zprev zint">'
-    + '<div class="ch" style="align-items:flex-start"><div><h2 style="margin:0">🔒 I miei costi <span class="small muted" style="font-weight:400">— area riservata</span></h2><div class="small muted">Non compare mai nel preventivo, nel PDF o nell’invio al cliente.</div></div></div>'
-    + righeTable + riepInterno + '</section>';
-  /* ---- AREA CLIENTE (verde): anteprima di ciò che vede il cliente + totali. ---- */
+    + '<div class="ch" style="align-items:flex-start"><div><h2 style="margin:0">🔒 I miei costi <span class="small muted" style="font-weight:400">— area riservata</span></h2><div class="small muted">I tuoi costi reali, scollegati dalle righe mostrate al cliente. Non compaiono mai nel PDF.</div></div></div>'
+    + costTable + addCost + riepInterno + '</section>';
+  /* ---- AREA CLIENTE (verde): lista righe cliente indipendente + totali. ---- */
+  const cliHead = '<thead><tr><th>Voce (al cliente)</th><th class="n">Q.tà</th><th>Um</th><th class="n">Prezzo un.</th><th class="n">Importo</th><th></th></tr></thead>';
+  const cliBody = (d.cliente || []).map((v, i) =>
+    '<tr><td><input class="nm" data-in="cliEdit" data-i="' + i + '" data-k="nome" value="' + esc(v.nome) + '" placeholder="Voce come la vede il cliente"></td>'
+    + '<td class="n"><input data-in="cliEdit" data-i="' + i + '" data-k="q" value="' + esc(v.q) + '"></td>'
+    + '<td><input data-in="cliEdit" data-i="' + i + '" data-k="um" value="' + esc(v.um) + '" placeholder="pz"></td>'
+    + '<td class="n"><input data-in="cliEdit" data-i="' + i + '" data-k="pu" value="' + esc(v.pu) + '"></td>'
+    + '<td class="n" id="cli_' + v.id + '">' + eur2(clienteRiga(v)) + '</td>'
+    + '<td class="n"><button class="xb" data-a="cliDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>'
+    + '<tr class="drow"><td colspan="6"><textarea data-in="cliEdit" data-i="' + i + '" data-k="descrEstesa" rows="2" placeholder="Descrizione estesa (sotto la voce nel PDF cliente)">' + esc(v.descrEstesa || '') + '</textarea><label class="incl"><input type="checkbox" data-in="cliChk" data-i="' + i + '" data-k="incluso"' + (v.incluso ? ' checked' : '') + ' style="width:auto"> <span>Includi nelle altre voci: non la mostra come riga separata, il prezzo si spalma sulle altre.</span></label></td></tr>').join('');
+  const cliTable = (d.cliente && d.cliente.length) ? '<div class="prevwrap"><table class="prevtbl">' + cliHead + '<tbody>' + cliBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessuna riga. Aggiungi le righe come le vedrà il cliente.</div>';
+  const addCli = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0"><span class="small muted">Aggiungi una riga:</span>' + optCat('prevPickCli') + '<button class="btn sm p" data-a="cliAddListino">+ Dal listino</button><button class="btn sm" data-a="cliAdd">+ Riga libera</button><button class="btn sm" data-a="listinoCat">Gestisci listino</button></div>';
   const cliPrev = '<section class="zprev zcli">'
-    + '<div class="ch" style="align-items:flex-start"><div><h2 style="margin:0">📄 Preventivo cliente</h2><div class="small muted">Ciò che finisce nel PDF e nell’invio al cliente.</div></div>'
-    + '<label class="row" style="gap:6px;align-items:center;font-size:13px;cursor:pointer;margin:0"><input type="checkbox" data-in="prevCliView"' + (cliView ? ' checked' : '') + ' style="width:auto;margin:0"> Vista cliente</label></div>'
-    + '<div id="prevCliPrev" style="margin:8px 0">' + cliPreviewHtml(d) + '</div>'
-    + (cliView ? '' : '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px"><span class="small muted">Aggiungi una riga:</span>' + pick + '<button class="btn sm p" data-a="prevAddListino">+ Dal listino</button><button class="btn sm" data-a="prevAddRiga">+ Riga libera</button><button class="btn sm" data-a="listinoCat">Gestisci listino</button></div>')
+    + '<div class="ch" style="align-items:flex-start"><div><h2 style="margin:0">📄 Preventivo cliente</h2><div class="small muted">Le righe come le vede il cliente: indipendenti dai costi qui sopra.</div></div>'
+    + '<label class="row" style="gap:6px;align-items:center;font-size:13px;cursor:pointer;margin:0"><input type="checkbox" data-in="prevCliView"' + (cliView ? ' checked' : '') + ' style="width:auto;margin:0"> Anteprima cliente</label></div>'
+    + (cliView ? '<div id="prevCliPrev" style="margin:8px 0">' + cliPreviewHtml(d) + '</div>' : (cliTable + addCli))
     + '</section>';
   const cli = '<section class="zprev zcli"><div class="ch"><h2>Totale al cliente</h2></div>' +
     '<label class="row" style="gap:6px;align-items:flex-start;margin-bottom:6px;font-size:13px;cursor:pointer"><input type="checkbox" data-in="prevTopChk" data-k="mostraQta"' + (d.mostraQta === true ? ' checked' : '') + ' style="width:auto;margin:3px 0 0"> <span>Mostra le quantità nel PDF cliente (colonna Q.tà)</span></label>' +
@@ -1819,7 +1870,8 @@ function vPreventivo() {
 }
 function prevRecalc() {
   const d = S.prev; if (!d) return; migraPrev(d);
-  (d.voci || []).forEach((v) => { const ec = document.getElementById('pcost_' + v.id); if (ec) ec.textContent = eur2(rigaCosto(v)); const el = document.getElementById('pcli_' + v.id); if (el) el.textContent = eur2(rigaCliente(v, d)); });
+  (d.costi || []).forEach((v) => { const e = document.getElementById('cst_' + v.id); if (e) e.textContent = eur2(costoRiga(v)); });
+  (d.cliente || []).forEach((v) => { const e = document.getElementById('cli_' + v.id); if (e) e.textContent = eur2(clienteRiga(v)); });
   const T = prevTotals(d), set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = eur2(val); };
   set('prevCosti', T.costi); set('prevImp', T.imp); set('prevNetto', T.netto); set('prevIva', T.iva); set('prevTot', T.tot); set('prevUtile', T.utile);
   const es = document.getElementById('prevSconto'); if (es) es.textContent = '− ' + eur2(T.sconto);
@@ -1827,6 +1879,31 @@ function prevRecalc() {
   const rm = document.getElementById('prevRicMed'); if (rm) rm.textContent = T.ricMed + '%';
   const cp = document.getElementById('prevCliPrev'); if (cp) cp.innerHTML = cliPreviewHtml(d);
 }
+/* ---- Costi (area riservata): lista indipendente ---- */
+I.costEdit = (ds, val) => { const v = S.prev && S.prev.costi[+ds.i]; if (!v) return; v[ds.k] = val; prevRecalc(); };
+A.costAdd = () => { if (!S.prev) return; migraPrev(S.prev); S.prev.costi.push({ id: uid(), nome: '', um: '', q: 1, cu: '' }); queueRender(); };
+A.costAddListino = () => {
+  if (!S.prev) return; migraPrev(S.prev);
+  const sel = document.getElementById('prevPickCosto'), it = sel && sel.value !== '' ? listinoCat()[+sel.value] : null;
+  if (!it) { toast('Scegli prima una voce dal listino.'); return; }
+  let cu = '', q0 = 1, um = it.um || '';
+  if (it.scaglioni && it.scaglioni.length) { q0 = num(it.scaglioni[0].da) || 1; um = it.um || 'kW'; cu = pkwFor(it.scaglioni, q0); }
+  else if (it.cu !== '' && it.cu != null) cu = num(it.cu);
+  S.prev.costi.push({ id: uid(), nome: it.nome, um: um, q: q0, cu: cu }); queueRender();
+};
+A.costDel = (d) => { if (S.prev && S.prev.costi) { S.prev.costi.splice(+d.i, 1); queueRender(); } };
+/* ---- Righe cliente: lista indipendente dai costi ---- */
+I.cliEdit = (ds, val) => { const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = val; prevRecalc(); };
+I.cliChk = (ds, val, el) => { const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = !!(el && el.checked); queueRender(); };
+A.cliAdd = () => { if (!S.prev) return; migraPrev(S.prev); S.prev.cliente.push({ id: uid(), nome: '', um: '', q: 1, pu: '', descrEstesa: '', incluso: false, inPrev: true }); queueRender(); };
+A.cliAddListino = () => {
+  if (!S.prev) return; migraPrev(S.prev);
+  const sel = document.getElementById('prevPickCli'), it = sel && sel.value !== '' ? listinoCat()[+sel.value] : null;
+  if (!it) { toast('Scegli prima una voce dal listino.'); return; }
+  const pu = (it.pu !== '' && it.pu != null) ? num(it.pu) : '';
+  S.prev.cliente.push({ id: uid(), nome: it.nome, um: it.um || '', q: 1, pu: pu, descrEstesa: it.descr || '', incluso: false, inPrev: true }); queueRender();
+};
+A.cliDel = (d) => { if (S.prev && S.prev.cliente) { S.prev.cliente.splice(+d.i, 1); queueRender(); } };
 I.prevEdit = (ds, val) => {
   const v = S.prev && S.prev.voci[+ds.vi]; if (!v) return;
   v[ds.k] = val;
