@@ -1710,10 +1710,28 @@ const clientPriceOf = (v, d) => {
 const LISTINO_DEFAULT = [
   { id: 'fv', nome: 'Impianto fotovoltaico', um: 'kW', descr: '', scaglioni: [{ da: 2, a: 4, pkw: 1400 }, { da: 4, a: 6, pkw: 1350 }, { da: 6, a: 10, pkw: 1200 }, { da: 10, a: 15, pkw: 1150 }, { da: 15, a: 50, pkw: 1000 }, { da: 50, a: 100, pkw: 980 }] },
   { id: 'pompa', nome: 'Pompa di calore', um: 'kW', descr: '', scaglioni: [{ da: 9, a: 9, pkw: 950 }, { da: 13, a: 13, pkw: 750 }, { da: 16, a: 16, pkw: 900 }] },
+  { id: 'batteria', nome: 'Batteria di accumulo', um: 'kWh', cu: 700, pu: '', descr: '' },
+  { id: 'gestione', nome: 'Gestione pratiche', um: '', cu: '', pu: '', descr: '' },
   { id: 'cavo', nome: 'Cavo', um: 'm', cu: 1.80, pu: '', descr: '' }
 ];
-function listinoCat() { const o = CFG('listinoCatalogo'); return (o && Array.isArray(o.items)) ? o.items : clone(LISTINO_DEFAULT); }
-async function listinoCatSave(items) { await put('impostazioni', 'listinoCatalogo', { items: items }); }
+/* Descrizioni standard di partenza (fotovoltaico, batterie, pompe di calore, pratiche): finché la voce
+   del listino non ha una descrizione sua, si usa questa. Si modificano dal listino ("Gestisci listino")
+   e, riga per riga, nel preventivo; altre voci con la loro descrizione si aggiungono dal listino. */
+const DESCR_STD = {
+  fv: 'Sistema solare fotovoltaico (monofase)\nPannelli solari MAY SUN Solar (25 anni garanzia sulla potenza, 25 garanzia sul prodotto, +/- 5% tolleranza potenza) tecnologia IBC alto rendimento\nInverter ZCS classico o similare (10 anni di garanzia sul prodotto)',
+  batteria: 'Storage system ZCS – Weco o similare (10 anni di garanzia)\nInstallazione integrata a impianto fotovoltaico inclusa',
+  pompa: 'Pompa di calore inverter o similare (garanzia come da costruttore)\nInstallazione, collegamenti idraulici ed elettrici e messa in servizio inclusi',
+  gestione: 'Sopralluogo, progettazione, installazione standard e allaccio inclusi.\nAvviamento pratiche GSE e distributore di rete incluse\nOneri di allaccio iter semplificato inclusi'
+};
+const descrStd = (it) => (it && (it.descr || DESCR_STD[it.id])) || '';
+function listinoCat() {
+  const o = CFG('listinoCatalogo');
+  if (!(o && Array.isArray(o.items))) return clone(LISTINO_DEFAULT);
+  const items = o.items;
+  if (!o.v2) LISTINO_DEFAULT.forEach((d) => { if (['batteria', 'gestione'].includes(d.id) && !items.some((x) => x.id === d.id)) items.push(clone(d)); });
+  return items;
+}
+async function listinoCatSave(items) { await put('impostazioni', 'listinoCatalogo', { items: items, v2: true }); }
 /* €/kW dallo scaglione che contiene la potenza; se nessuno la contiene, lo scaglione più vicino. */
 function pkwFor(sc, kw) {
   if (!sc || !sc.length) return '';
@@ -1929,7 +1947,7 @@ function vPreventivo() {
     + '<td class="n"><input data-in="cliEdit" data-i="' + i + '" data-k="pu" value="' + esc(v.pu) + '"></td>'
     + '<td class="n" id="cli_' + v.id + '">' + eur2(clienteRiga(v)) + '</td>'
     + '<td class="n"><button class="xb" data-a="cliDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>'
-    + '<tr class="drow"><td colspan="6"><textarea data-in="cliEdit" data-i="' + i + '" data-k="descrEstesa" rows="2" placeholder="Descrizione estesa (sotto la voce nel PDF cliente)">' + esc(v.descrEstesa || '') + '</textarea><label class="incl"><input type="checkbox" data-in="cliChk" data-i="' + i + '" data-k="incluso"' + (v.incluso ? ' checked' : '') + ' style="width:auto"> <span>Includi nelle altre voci: non la mostra come riga separata, il prezzo si spalma sulle altre.</span></label></td></tr>').join('');
+    + '<tr class="drow"><td colspan="6">' + (v.scaglioni ? '<div class="small muted" style="margin-bottom:4px">Prezzo €/kW calcolato in automatico dalla potenza (scaglione + ricarico ' + num(v.ricPct) + '%), modificabile a mano.' + (v.puAuto === false ? ' <button class="btn sm" data-a="cliPuAuto" data-i="' + i + '">Ricalcola automatico</button>' : '') + '</div>' : '') + '<textarea data-in="cliEdit" data-i="' + i + '" data-k="descrEstesa" rows="2" placeholder="Descrizione estesa (sotto la voce nel PDF cliente)">' + esc(v.descrEstesa || '') + '</textarea><label class="incl"><input type="checkbox" data-in="cliChk" data-i="' + i + '" data-k="incluso"' + (v.incluso ? ' checked' : '') + ' style="width:auto"> <span>Includi nelle altre voci: non la mostra come riga separata, il prezzo si spalma sulle altre.</span></label></td></tr>').join('');
   const cliTable = (d.cliente && d.cliente.length) ? '<div class="prevwrap"><table class="prevtbl">' + cliHead + '<tbody>' + cliBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessuna riga. Aggiungi le righe come le vedrà il cliente.</div>';
   const tipi = D('tipiLavoro').sort(byStr((x) => x.nome));
   const addTipo = tipi.length ? '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 0"><span class="small muted">Tipologia di lavoro:</span><select id="prevPickTipo"><option value="">— scegli —</option>' + tipi.map((t) => '<option value="' + esc(t.id) + '">' + esc(t.nome) + '</option>').join('') + '</select><button class="btn sm p" data-a="cliAddTipo">+ Aggiungi tipologia</button><span class="small muted">voci e importi predefiniti, poi modificabili</span></div>' : '';
@@ -2003,7 +2021,7 @@ function prevCostoForm(cat, i, preset) {
         let q = 1, um = '', puBase = num(item.importo) * (1 + ric / 100);
         if (cat === 'FV' || cat === 'POMPA') { q = num(item.kw) || 1; um = 'kW'; puBase = num(item.prezzoKw) * (1 + ric / 100); }
         else if (cat === 'BATTERIA') { q = num(item.kwh) || 1; um = 'kWh'; puBase = num(item.prezzoKwh) * (1 + ric / 100); }
-        S.prev.cliente.push({ id: uid(), nome: item.descrizione || lab(CAT_COSTO, cat), um: um, q: q, pu: r2(puBase), descrEstesa: '', incluso: false, inPrev: true });
+        S.prev.cliente.push({ id: uid(), nome: item.descrizione || lab(CAT_COSTO, cat), um: um, q: q, pu: r2(puBase), descrEstesa: DESCR_STD[{ FV: 'fv', POMPA: 'pompa', BATTERIA: 'batteria' }[cat]] || '', incluso: false, inPrev: true });
       }
       closeModal(); queueRender();
     }
@@ -2021,15 +2039,32 @@ A.pCostAddListino = () => {
   prevCostoForm('FORNITORE', null, { descrizione: it.nome, importo: (it.cu !== '' && it.cu != null) ? num(it.cu) : '' });
 };
 /* ---- Righe cliente: lista indipendente dai costi ---- */
-I.cliEdit = (ds, val) => { const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = val; prevRecalc(); };
+I.cliEdit = (ds, val) => {
+  const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = val;
+  if (v.scaglioni) {
+    if (ds.k === 'pu') v.puAuto = false;
+    else if (ds.k === 'q' && v.puAuto !== false && num(val) > 0) {
+      v.pu = r2(pkwFor(v.scaglioni, val) * (1 + num(v.ricPct) / 100));
+      const el = document.querySelector('[data-in="cliEdit"][data-i="' + ds.i + '"][data-k="pu"]'); if (el) el.value = v.pu;
+    }
+  }
+  prevRecalc();
+};
+A.cliPuAuto = (d) => { const v = S.prev && S.prev.cliente[+d.i]; if (!v || !v.scaglioni) return; v.puAuto = true; v.pu = r2(pkwFor(v.scaglioni, v.q) * (1 + num(v.ricPct) / 100)); queueRender(); };
 I.cliChk = (ds, val, el) => { const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = !!(el && el.checked); queueRender(); };
 A.cliAdd = () => { if (!S.prev) return; migraPrev(S.prev); S.prev.cliente.push({ id: uid(), nome: '', um: '', q: 1, pu: '', descrEstesa: '', incluso: false, inPrev: true }); queueRender(); };
 A.cliAddListino = () => {
   if (!S.prev) return; migraPrev(S.prev);
   const sel = document.getElementById('prevPickCli'), it = sel && sel.value !== '' ? listinoCat()[+sel.value] : null;
   if (!it) { toast('Scegli prima una voce dal listino.'); return; }
+  if (it.scaglioni && it.scaglioni.length) {
+    /* voce a scaglioni (es. fotovoltaico €/kW): prezzo al kW in automatico dalla potenza, con il ricarico cliente */
+    const q0 = num(it.scaglioni[0].da) || 1, ric = num(cd().ricaricoCliente);
+    S.prev.cliente.push({ id: uid(), nome: it.nome, um: it.um || 'kW', q: q0, pu: r2(pkwFor(it.scaglioni, q0) * (1 + ric / 100)), scaglioni: clone(it.scaglioni), puAuto: true, ricPct: ric, descrEstesa: descrStd(it), incluso: false, inPrev: true });
+    queueRender(); return;
+  }
   const pu = (it.pu !== '' && it.pu != null) ? num(it.pu) : '';
-  S.prev.cliente.push({ id: uid(), nome: it.nome, um: it.um || '', q: 1, pu: pu, descrEstesa: it.descr || '', incluso: false, inPrev: true }); queueRender();
+  S.prev.cliente.push({ id: uid(), nome: it.nome, um: it.um || '', q: 1, pu: pu, descrEstesa: descrStd(it), incluso: false, inPrev: true }); queueRender();
 };
 A.cliDel = (d) => { if (S.prev && S.prev.cliente) { S.prev.cliente.splice(+d.i, 1); queueRender(); } };
 /* Preventivo cliente predefinito per una tipologia di lavoro: custom della tipologia, altrimenti
@@ -2080,9 +2115,9 @@ A.prevAddListino = () => {
   if (!it) { toast('Scegli prima una voce dal listino.'); return; }
   if (it.scaglioni && it.scaglioni.length) {
     const q0 = num(it.scaglioni[0].da) || 1;
-    S.prev.voci.push(nuovaRiga({ nome: it.nome, um: it.um || 'kW', q: q0, cu: pkwFor(it.scaglioni, q0), scaglioni: clone(it.scaglioni), cuAuto: true, descrEstesa: it.descr || '' }));
+    S.prev.voci.push(nuovaRiga({ nome: it.nome, um: it.um || 'kW', q: q0, cu: pkwFor(it.scaglioni, q0), scaglioni: clone(it.scaglioni), cuAuto: true, descrEstesa: descrStd(it) }));
   } else {
-    S.prev.voci.push(nuovaRiga({ nome: it.nome, um: it.um || '', q: 1, cu: num(it.cu), pu: (it.pu !== '' && it.pu != null) ? num(it.pu) : '', descrEstesa: it.descr || '' }));
+    S.prev.voci.push(nuovaRiga({ nome: it.nome, um: it.um || '', q: 1, cu: num(it.cu), pu: (it.pu !== '' && it.pu != null) ? num(it.pu) : '', descrEstesa: descrStd(it) }));
   }
   queueRender();
 };
@@ -2104,7 +2139,7 @@ A.listinoNew = (d) => {
     : { _idx: -1, id: uid(), nome: '', um: '', cu: '', pu: '', descr: '' };
   A.listinoEditRender();
 };
-A.listinoEdit = (d) => { const it = clone(listinoCat()[+d.j]); it._idx = +d.j; S.lcEdit = it; A.listinoEditRender(); };
+A.listinoEdit = (d) => { const it = clone(listinoCat()[+d.j]); it._idx = +d.j; if (!it.descr) it.descr = descrStd(it); S.lcEdit = it; A.listinoEditRender(); };
 A.listinoEditRender = () => {
   const e = S.lcEdit; if (!e) return;
   const tiered = Array.isArray(e.scaglioni);
