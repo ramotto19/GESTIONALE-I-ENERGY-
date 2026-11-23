@@ -299,6 +299,14 @@ function syncScroll() {
   if (open) { savedScrollY = window.scrollY || window.pageYOffset || 0; document.body.style.top = (-savedScrollY) + 'px'; document.documentElement.classList.add('modal-open'); document.body.classList.add('modal-open'); scrollLocked = true; }
   else { document.documentElement.classList.remove('modal-open'); document.body.classList.remove('modal-open'); document.body.style.top = ''; scrollLocked = false; window.scrollTo(0, savedScrollY); }
 }
+/* Il selettore di Google Drive si posiziona rispetto allo scroll della pagina: con il blocco dello scroll
+   attivo (body fisso) finiva fuori schermo e restava solo lo sfondo chiaro. Mentre è aperto si toglie il
+   blocco, poi syncScroll() lo rimette se la finestra del modulo è ancora aperta. */
+function pickerScrollFree() {
+  if (!scrollLocked) return;
+  document.documentElement.classList.remove('modal-open'); document.body.classList.remove('modal-open'); document.body.style.top = '';
+  scrollLocked = false; window.scrollTo(0, savedScrollY);
+}
 function openModal(html, wide) { $('#modal').innerHTML = '<div class="ov"><div class="mod' + (wide ? ' wide' : '') + '" role="dialog" aria-modal="true">' + html + '</div></div>'; syncScroll(); const f = $('#modal input:not([type=hidden]):not([type=checkbox]),#modal select,#modal textarea'); if (f) f.focus(); }
 function closeModal() { const m = $('#modal'); if (m) m.innerHTML = ''; FORM = null; syncScroll(); }
 function toast(msg, kind) { const t = $('#toast'); if (!t) return; t.textContent = msg; t.className = 'toast show ' + (kind || ''); clearTimeout(toast.t); toast.t = setTimeout(() => { t.className = 'toast'; }, 3500); }
@@ -4382,6 +4390,7 @@ function driveBrowseClick(btn) {
     if (!token) { toast('Autorizzazione a Google Drive non riuscita o annullata.', 'err'); return; }
     if (!CONFIG.API_KEY) { toast('Selettore Drive non configurato: manca API_KEY in index.html.', 'err'); return; }
     try { await loadPickerApi(); } catch (e) { toast(e.message, 'err'); return; }
+    pickerScrollFree();
     const picked = await new Promise((resolve) => {
      try {
       /* setParent('root') apre il selettore già dentro "Il mio Drive" (la struttura di cartelle
@@ -4406,6 +4415,7 @@ function driveBrowseClick(btn) {
       picker.setVisible(true);
      } catch (e) { toast('Selettore Drive non disponibile: ' + (e && e.message || e), 'err'); resolve(null); }
     });
+    syncScroll();
     if (!picked) return;
     const input = document.getElementById(targetId);
     if (input) { input.value = picked.url; input.dataset.pickedName = picked.name; }
@@ -4429,6 +4439,7 @@ function driveBrowseMulti(btn) {
     if (!token) { toast('Autorizzazione a Google Drive non riuscita o annullata.', 'err'); return; }
     if (!CONFIG.API_KEY) { toast('Selettore Drive non configurato: manca API_KEY in index.html.', 'err'); return; }
     try { await loadPickerApi(); } catch (e) { toast(e.message, 'err'); return; }
+    pickerScrollFree();
     const picked = await new Promise((resolve) => {
       const view = new google.picker.DocsView(google.picker.ViewId.DOCS).setIncludeFolders(true).setSelectFolderEnabled(false).setParent('root').setMode(google.picker.DocsViewMode.LIST);
       const picker = new google.picker.PickerBuilder()
@@ -4448,6 +4459,7 @@ function driveBrowseMulti(btn) {
         .build();
       picker.setVisible(true);
     });
+    syncScroll();
     if (!picked) return;
     const input = document.getElementById(targetId);
     if (input) input.value = JSON.stringify(picked);
