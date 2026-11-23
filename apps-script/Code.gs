@@ -42,6 +42,7 @@ function handle(body) {
     case 'deleteFile': return apiDeleteFile(body, caller, role);
     case 'archiveFile': return apiArchiveFile(body, caller, role);
     case 'resolveFolder': return apiResolveFolder(body, caller, role);
+    case 'estraiDocumento': return apiEstraiDocumento(body, caller, role);
     default: return { ok: false, error: 'Azione sconosciuta: ' + body.action };
   }
 }
@@ -184,6 +185,66 @@ function apiArchiveFile(body, caller, role) {
        a non confondersi leggendo i log. */
     return { ok: false, error: (e && /momentaneamente occupato/.test(e.message)) ? e.message : 'File non trovato o non spostabile.' };
   }
+}
+
+/* ---------- Lettura documenti con Claude (fase "preventivatore intelligente") ----------
+   Legge un PDF già caricato (per fileId su Drive) o passato in base64 e ne estrae i dati in JSON,
+   chiamando l'API di Anthropic. La chiave sta nelle proprietà dello script (ANTHROPIC_API_KEY),
+   non nel codice: il repository è pubblico. Solo l'amministratore può usarla.
+   Privacy bollette: il prompt chiede di NON estrarre dati personali (intestatario, indirizzo,
+   codice fiscale, P.IVA, POD, IBAN, numero cliente); si leggono solo i dati tecnici dei consumi. */
+function apiEstraiDocumento(body, caller, role) {
+  if (role !== 'admin') return { ok: false, error: 'Non hai i permessi per leggere i documenti.' };
+  var props = PropertiesService.getScriptProperties();
+  var KEY = props.getProperty('ANTHROPIC_API_KEY');
+  if (!KEY) return { ok: false, error: 'Chiave Claude non configurata: imposta ANTHROPIC_API_KEY nelle proprietà dello script.' };
+  var MODEL = props.getProperty('ANTHROPIC_MODEL') || 'claude-sonnet-4-5';
+  var b64, media;
+  try {
+    if (body.base64) { b64 = body.base64; media = body.mimeType || 'application/pdf'; }
+    else if (body.fileId) { var f = DriveApp.getFileById(body.fileId), blob = f.getBlob(); media = blob.getContentType() || 'application/pdf'; b64 = Utilities.base64Encode(blob.getBytes()); }
+    else return { ok: false, error: 'Nessun documento da leggere.' };
+  } catch (e) { return { ok: false, error: 'Documento non trovato o non leggibile.' }; }
+  var content = [];
+  if (media === 'application/pdf') content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } });
+  else if (media === 'image/png' || media === 'image/jpeg' || media === 'image/webp' || media === 'image/gif') content.push({ type: 'image', source: { type: 'base64', media_type: media, data: b64 } });
+  else return { ok: false, error: 'Formato non supportato: carica un PDF o un’immagine.' };
+  content.push({ type: 'text', text: promptPerTipo(body.tipo) });
+  var payload = { model: MODEL, max_tokens: 4096, messages: [{ role: 'user', content: content }] };
+  var res;
+  try {
+    res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', { method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { 'x-api-key': KEY, 'anthropic-version': '2023-06-01' }, payload: JSON.stringify(payload) });
+  } catch (e) { return { ok: false, error: 'Impossibile contattare Claude: ' + String(e && e.message || e) }; }
+  var code = res.getResponseCode();
+  if (code !== 200) {
+    var em = '';
+    try { em = (JSON.parse(res.getContentText()).error || {}).message || ''; } catch (e) {}
+    return { ok: false, error: 'Claude ha risposto con errore ' + code + (em ? ' (' + em + ')' : '') + '. Controlla la chiave API e il credito.' };
+  }
+  var j = JSON.parse(res.getContentText());
+  var txt = '';
+  (j.content || []).forEach(function (p) { if (p && p.type === 'text') txt += p.text; });
+  var dati = estraiJson(txt);
+  if (!dati) return { ok: false, error: 'Non sono riuscito a leggere i dati dal documento.' };
+  return { ok: true, tipo: body.tipo || 'offerta_fornitore', dati: dati };
+}
+/* estrae il primo oggetto JSON dal testo (Claude può aggiungere testo o blocchi markdown). */
+function estraiJson(t) {
+  if (!t) return null;
+  try { return JSON.parse(t); } catch (e) {}
+  var m = t.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch (e) {} }
+  return null;
+}
+function promptPerTipo(tipo) {
+  var base = 'Leggi il documento allegato e rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo e senza blocchi di codice markdown. Usa il punto come separatore decimale e null per i valori che non trovi.';
+  if (tipo === 'bolletta') {
+    return base + ' È una bolletta elettrica. Estrai SOLO questi dati tecnici: {"potenza_impegnata_kw":numero|null,"consumo_f1_kwh":numero|null,"consumo_f2_kwh":numero|null,"consumo_f3_kwh":numero|null,"consumo_totale_kwh":numero|null,"periodo":stringa|null,"prezzo_energia_eur_kwh":numero|null,"tipo_fornitura":stringa|null}. NON estrarre e NON riportare in nessun campo: intestatario, nome, indirizzo, codice fiscale, partita IVA, POD, IBAN, numero cliente o altri dati personali. Se li incontri, ignorali.';
+  }
+  if (tipo === 'progetto') {
+    return base + ' È un progetto o una planimetria di impianto. Estrai: {"potenza_kw":numero|null,"apparecchiature":[{"descrizione":stringa,"quantita":numero|null,"um":stringa|null}],"metrature":stringa|null,"note":stringa|null}.';
+  }
+  return base + ' È un’offerta o un preventivo di un fornitore. I prezzi indicati sono i COSTI di acquisto per la mia azienda. Estrai: {"fornitore":stringa|null,"numero":stringa|null,"data":stringa|null,"validita":stringa|null,"righe":[{"codice":stringa|null,"descrizione":stringa,"um":stringa|null,"quantita":numero|null,"prezzo_unitario":numero|null,"sconto_pct":numero|null}],"trasporto":numero|null,"note":stringa|null}.';
 }
 
 function withLock(fn) {

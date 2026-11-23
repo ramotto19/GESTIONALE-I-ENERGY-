@@ -1592,7 +1592,9 @@ function specDefault(v) {
   if (v.tipo === 'GESTIONE') return 'Sopralluogo, progettazione, installazione standard e allaccio inclusi.\nAvviamento pratiche GSE e distributore di rete incluse\nOneri di allaccio iter semplificato inclusi';
   return '';
 }
-const DOC_TIPI = [['SOPRALLUOGO', 'Sopralluogo'], ['FOTO', 'Foto'], ['PROGETTO', 'Progetto / disegno'], ['PLANIMETRIA', 'Planimetria'], ['BOLLETTA', 'Bolletta'], ['POS', 'POS'], ['SCHEDA', 'Scheda tecnica'], ['ALTRO', 'Altro']];
+const DOC_TIPI = [['SOPRALLUOGO', 'Sopralluogo'], ['FOTO', 'Foto'], ['PROGETTO', 'Progetto / disegno'], ['PLANIMETRIA', 'Planimetria'], ['BOLLETTA', 'Bolletta'], ['OFFERTA_FORNITORE', 'Offerta / preventivo fornitore'], ['POS', 'POS'], ['SCHEDA', 'Scheda tecnica'], ['ALTRO', 'Altro']];
+/* tipo documento -> tipo di lettura per Claude (apiEstraiDocumento). */
+function tipoIA(t) { if (t === 'BOLLETTA') return 'bolletta'; if (t === 'PROGETTO' || t === 'PLANIMETRIA') return 'progetto'; return 'offerta_fornitore'; }
 function calcVoce(v, d) {
   const n = num;
   switch (v.tipo) {
@@ -1771,7 +1773,8 @@ function voceCard(v, i, d) {
   return '<div class="card" style="margin:0 0 10px"><div class="row" style="justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px"><b>' + esc(lab(PREV_TIPI, v.tipo)) + (v.descrizione ? ' <span class="muted" style="font-weight:400">— ' + esc(v.descrizione) + '</span>' : '') + '</b><button class="btn sm" data-a="prevDel" data-i="' + i + '">Togli</button></div>' + altroDescr + '<div class="fgrid">' + body + impField + margField + '</div>' + chk + '<div style="text-align:right;margin-top:8px;font-size:13px">Costo: <b id="pcost_' + v.id + '">' + eur2(calcVoce(v, d)) + '</b>' + (v.inPrev !== false ? ' · Al cliente: <b id="pcli_' + v.id + '">' + eur2(clientPriceOf(v, d)) + '</b>' : ' · <span class="muted">non nel preventivo</span>') + '</div></div>';
 }
 function docRow(dc, o) {
-  return '<div class="blk" style="justify-content:space-between;align-items:center"><div style="flex:1;min-width:0"><b>' + esc(dc.titolo || lab(DOC_TIPI, dc.tipo)) + '</b> <span class="small muted">' + esc(lab(DOC_TIPI, dc.tipo)) + '</span></div><div class="row" style="gap:6px">' + fileLink(dc.file) + '<button class="btn sm" data-a="prevDocDel" data-did="' + esc(dc.id) + '">Togli</button></div></div>';
+  const leggi = (dc.file && (dc.file.id || dc.file.url)) ? '<button class="btn sm p" data-a="prevLeggiIA" data-did="' + esc(dc.id) + '">Leggi con IA</button>' : '';
+  return '<div class="blk" style="justify-content:space-between;align-items:center"><div style="flex:1;min-width:0"><b>' + esc(dc.titolo || lab(DOC_TIPI, dc.tipo)) + '</b> <span class="small muted">' + esc(lab(DOC_TIPI, dc.tipo)) + '</span></div><div class="row" style="gap:6px">' + leggi + fileLink(dc.file) + '<button class="btn sm" data-a="prevDocDel" data-did="' + esc(dc.id) + '">Togli</button></div></div>';
 }
 function vPreventivo() {
   if (!S.admin) return '<div class="empty">Area riservata.</div>';
@@ -1920,6 +1923,62 @@ A.prevSave = async (d) => { const arr = clone(G('clienti', d.id).offerte || []),
 A.prevPdf = async (d) => { await A.prevSave(d); const c = G('clienti', d.id), o = (c.offerte || []).find((x) => x.id === d.x); if (o) printHtml(preventivoHtml(c, o), true, 'Offerta ' + (offNum(o) || c.ragioneSociale), true); };
 A.prevDocNew = (d) => { const c = G('clienti', d.id); if (!c) return; openForm({ title: 'Allega documento', info: 'Bolletta, progetto, foto di sopralluogo, scheda tecnica…', fields: [{ k: 'titolo', l: 'Titolo', req: true }, { k: 'tipo', l: 'Tipo', t: 'select', req: true, half: true, opts: DOC_TIPI }, { k: 'file', l: 'File', t: 'file' }], values: { tipo: 'BOLLETTA' }, folder: ['Clienti', c.ragioneSociale, 'Offerte e preventivi', 'Documenti'], onSave: async (v) => { const arr = clone(G('clienti', d.id).offerte || []), i = arr.findIndex((x) => x.id === d.x); if (i < 0) return; arr[i].documenti = (arr[i].documenti || []).concat([{ id: uid(), titolo: v.titolo, tipo: v.tipo, file: v.file }]); const doc2 = clone(G('clienti', d.id)); doc2.offerte = arr; applyLocalWrite('clienti', d.id, doc2); await patch('clienti', d.id, { offerte: arr }); } }); };
 A.prevDocDel = async (d) => { if (!(await confirmBox('Togliere questo documento dall’offerta?', 'Togli'))) return; const arr = clone(G('clienti', S.id).offerte || []), i = arr.findIndex((x) => x.id === S.tab); if (i < 0) return; arr[i].documenti = (arr[i].documenti || []).filter((x) => x.id !== d.did); const doc2 = clone(G('clienti', S.id)); doc2.offerte = arr; applyLocalWrite('clienti', S.id, doc2); await patch('clienti', S.id, { offerte: arr }); };
+/* ---------- Lettura con Claude: estrae i dati dal documento e li fa confermare prima di usarli ---------- */
+A.prevLeggiIA = async (d) => {
+  const c = G('clienti', S.id); if (!c) return;
+  const o = (c.offerte || []).find((x) => x.id === S.tab); if (!o) return;
+  const dc = (o.documenti || []).find((x) => x.id === d.did); if (!dc || !dc.file) { toast('Documento senza file.', 'err'); return; }
+  const tipo = tipoIA(dc.tipo);
+  toast('Lettura del documento in corso… può richiedere qualche secondo.');
+  let res;
+  try { res = await scriptOnce('estraiDocumento', { fileId: dc.file.id, tipo: tipo }, 180000); }
+  catch (e) { toast(e && e.message ? e.message : 'Lettura non riuscita.', 'err'); return; }
+  iaApriModal(res, dc);
+};
+function iaRigheDaDati(res) {
+  const n = num, dati = res.dati || {};
+  if (res.tipo === 'offerta_fornitore') {
+    return (dati.righe || []).filter((r) => r && (r.descrizione || r.codice)).map((r) => {
+      const sc = n(r.sconto_pct), pu = n(r.prezzo_unitario), cu = sc > 0 ? r2(pu * (1 - sc / 100)) : r2(pu);
+      return { on: true, nome: String(r.descrizione || r.codice || 'Voce'), um: r.um || 'pz', q: n(r.quantita) || 1, cu: cu, verif: false };
+    });
+  }
+  if (res.tipo === 'progetto') {
+    return (dati.apparecchiature || []).filter((r) => r && r.descrizione).map((r) => ({ on: true, nome: String(r.descrizione), um: r.um || 'pz', q: n(r.quantita) || 1, cu: '', verif: true }));
+  }
+  return [];
+}
+function iaApriModal(res, dc) {
+  S.iaExtract = { tipo: res.tipo, dati: res.dati || {}, docId: dc.id, rows: iaRigheDaDati(res) };
+  const dati = res.dati || {};
+  if (res.tipo === 'bolletta') {
+    const r = (l, v, u) => '<div class="blk" style="justify-content:space-between"><span class="muted">' + esc(l) + '</span><b>' + (v == null || v === '' ? '—' : esc(v) + (u ? ' ' + u : '')) + '</b></div>';
+    const body = '<h2 style="margin-top:0">Dati letti dalla bolletta</h2>'
+      + r('Potenza impegnata', dati.potenza_impegnata_kw, 'kW') + r('Consumo F1', dati.consumo_f1_kwh, 'kWh') + r('Consumo F2', dati.consumo_f2_kwh, 'kWh') + r('Consumo F3', dati.consumo_f3_kwh, 'kWh') + r('Consumo totale', dati.consumo_totale_kwh, 'kWh') + r('Periodo', dati.periodo, '') + r('Prezzo energia', dati.prezzo_energia_eur_kwh, '€/kWh') + r('Tipo fornitura', dati.tipo_fornitura, '')
+      + '<p class="small muted" style="margin-top:8px">Non vengono letti né salvati dati personali (intestatario, indirizzo, POD, IBAN, numero cliente).</p>'
+      + '<div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn p" data-a="close">Chiudi</button></div>';
+    openModal(body);
+    return;
+  }
+  const rows = S.iaExtract.rows;
+  if (!rows.length) { openModal('<h2 style="margin-top:0">Lettura completata</h2><p class="muted">Non ho trovato righe utilizzabili nel documento.</p><div class="row" style="justify-content:flex-end"><button class="btn p" data-a="close">Chiudi</button></div>'); return; }
+  const intest = res.tipo === 'offerta_fornitore' ? ('<p class="small muted" style="margin-top:0">' + esc([dati.fornitore, dati.numero ? 'n. ' + dati.numero : '', dati.data, dati.validita ? 'validità ' + dati.validita : ''].filter(Boolean).join(' · ')) + '</p>') : '';
+  const trs = rows.map((r, i) => '<tr><td style="padding:5px 6px"><input type="checkbox" data-in="iaChk" data-i="' + i + '"' + (r.on ? ' checked' : '') + ' style="width:auto"></td><td style="padding:5px 6px">' + esc(r.nome) + '</td><td style="padding:5px 6px;text-align:right">' + esc(r.q) + ' ' + esc(r.um) + '</td><td style="padding:5px 6px;text-align:right">' + (r.verif ? '<span class="small muted">da verificare</span>' : eur2(r.cu)) + '</td></tr>').join('');
+  const body = '<h2 style="margin-top:0">Righe lette dal documento</h2>' + intest
+    + '<p class="small muted">Diventano righe di <b>costo</b> nell’area riservata; i prezzi sono i tuoi costi d’acquisto. Potrai modificarle dopo.' + (res.tipo === 'progetto' ? ' Dal progetto non arrivano prezzi: le righe restano senza costo, da completare.' : '') + '</p>'
+    + '<div style="overflow:auto;max-height:50vh"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th></th><th style="text-align:left;padding:5px 6px">Voce</th><th style="text-align:right;padding:5px 6px">Q.tà</th><th style="text-align:right;padding:5px 6px">Costo un.</th></tr></thead><tbody>' + trs + '</tbody></table></div>'
+    + '<div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" data-a="close">Annulla</button><button class="btn p" data-a="iaAddCosti">Aggiungi ai costi</button></div>';
+  openModal(body, true);
+}
+I.iaChk = (ds, val, el) => { if (S.iaExtract && S.iaExtract.rows[+ds.i]) S.iaExtract.rows[+ds.i].on = !!(el && el.checked); };
+A.iaAddCosti = () => {
+  if (!S.iaExtract || !S.prev) { closeModal(); return; }
+  migraPrev(S.prev);
+  let n = 0;
+  S.iaExtract.rows.forEach((r) => { if (!r.on) return; S.prev.voci.push(nuovaRiga({ nome: r.nome, um: r.um, q: r.q, cu: r.cu, descrEstesa: '' })); n++; });
+  S.iaExtract = null; closeModal(); queueRender();
+  toast(n ? (n + (n === 1 ? ' riga aggiunta ai costi.' : ' righe aggiunte ai costi.')) : 'Nessuna riga selezionata.');
+};
 A.prevAccetta = async (d) => { await A.prevSave(d); const arr = clone(G('clienti', d.id).offerte || []), i = arr.findIndex((x) => x.id === d.x); if (i >= 0) { arr[i].esito = 'ACCETTATA'; const doc2 = clone(G('clienti', d.id)); doc2.offerte = arr; applyLocalWrite('clienti', d.id, doc2); await patch('clienti', d.id, { offerte: arr }); } offAccettata(d.id, d.x); };
 A.listinoParam = () => { const d = ld(), a = az(); openForm({ title: 'Prezzi fissi e dati azienda', wide: true, info: 'Valori di partenza per il calcolo automatico dei preventivi (correggibili anche voce per voce) e intestazione del PDF.', fields: [{ k: 'fvKw', l: 'Fotovoltaico: costo € per kW', t: 'number', half: true }, { k: 'batteriaKwh', l: 'Batteria: costo € per kWh', t: 'number', half: true }, { k: 'pompaKw', l: 'Pompa di calore: costo € per kW', t: 'number', half: true }, { k: 'manodoperaGiorno', l: 'Manodopera: costo € persona/giorno', t: 'number', half: true }, { k: 'maggWeekend', l: 'Maggiorazione weekend %', t: 'number', half: true }, { k: 'margine', l: 'Margine azienda predefinito %', t: 'number', half: true }, { k: 'iva', l: 'IVA predefinita %', t: 'number', half: true }, { k: 'nome', l: 'Ragione sociale', half: true }, { k: 'piva', l: 'P.IVA', half: true }, { k: 'indirizzo', l: 'Indirizzo' }, { k: 'email', l: 'Email', half: true }, { k: 'telefono', l: 'Telefono', half: true }, { k: 'fax', l: 'Fax', half: true }, { k: 'web', l: 'Sito web', half: true }, { k: 'iban', l: 'IBAN (per la conferma d’ordine)' }], values: Object.assign({}, d, a), onSave: async (v) => { await put('impostazioni', 'listinoOfferte', { fvKw: v.fvKw, batteriaKwh: v.batteriaKwh, pompaKw: v.pompaKw, manodoperaGiorno: v.manodoperaGiorno, maggWeekend: v.maggWeekend, margine: v.margine, iva: v.iva }); await put('impostazioni', 'azienda', { nome: v.nome, piva: v.piva, indirizzo: v.indirizzo, email: v.email, telefono: v.telefono, fax: v.fax, web: v.web, iban: v.iban }); } }); };
 function voceDescr(v) {
@@ -3641,12 +3700,12 @@ async function sbApi(action, p) {
   return { ok: false, error: 'Azione sconosciuta: ' + action };
 }
 /* Google Drive (cartelle, caricamento di riserva, archivio "Scaduti"): resta nel backend Apps Script, che ora riconosce l'accesso Supabase */
-async function scriptOnce(action, params) {
+async function scriptOnce(action, params, timeoutMs) {
   const sb = await sbClient();
   const r0 = await sb.auth.getSession();
   const tok = r0 && r0.data && r0.data.session ? r0.data.session.access_token : ID_TOKEN;
   const body = Object.assign({ action: action, idToken: tok }, params || {});
-  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 25000);
+  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), timeoutMs || 25000);
   let res;
   try { res = await fetch(CONFIG.SCRIPT_URL, { method: 'POST', body: JSON.stringify(body), signal: ctrl.signal }); }
   catch (e) { const err = new Error('Impossibile contattare il backend. Controlla la connessione.'); err.transient = true; throw err; }
