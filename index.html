@@ -1947,7 +1947,7 @@ function vPreventivo() {
     + '<td class="n"><input data-in="cliEdit" data-i="' + i + '" data-k="pu" value="' + esc(v.pu) + '"></td>'
     + '<td class="n" id="cli_' + v.id + '">' + eur2(clienteRiga(v)) + '</td>'
     + '<td class="n"><button class="xb" data-a="cliDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>'
-    + '<tr class="drow"><td colspan="6">' + (v.scaglioni ? '<div class="small muted" style="margin-bottom:4px">Prezzo €/kW calcolato in automatico dalla potenza (scaglione + ricarico ' + num(v.ricPct) + '%), modificabile a mano.' + (v.puAuto === false ? ' <button class="btn sm" data-a="cliPuAuto" data-i="' + i + '">Ricalcola automatico</button>' : '') + '</div>' : '') + '<textarea data-in="cliEdit" data-i="' + i + '" data-k="descrEstesa" rows="2" placeholder="Descrizione estesa (sotto la voce nel PDF cliente)">' + esc(v.descrEstesa || '') + '</textarea><label class="incl"><input type="checkbox" data-in="cliChk" data-i="' + i + '" data-k="incluso"' + (v.incluso ? ' checked' : '') + ' style="width:auto"> <span>Includi nelle altre voci: non la mostra come riga separata, il prezzo si spalma sulle altre.</span></label></td></tr>').join('');
+    + '<tr class="drow"><td colspan="6">' + (v.scaglioni ? '<div class="small muted" style="margin-bottom:4px">Prezzo €/kW calcolato in automatico dalla potenza (scaglione' + (num(v.ricPct) ? ' + ricarico ' + num(v.ricPct) + '%' : ', margine già incluso') + '), modificabile a mano.' + (v.puAuto === false ? ' <button class="btn sm" data-a="cliPuAuto" data-i="' + i + '">Ricalcola automatico</button>' : '') + '</div>' : '') + '<textarea data-in="cliEdit" data-i="' + i + '" data-k="descrEstesa" rows="2" placeholder="Descrizione estesa (sotto la voce nel PDF cliente)">' + esc(v.descrEstesa || '') + '</textarea><label class="incl"><input type="checkbox" data-in="cliChk" data-i="' + i + '" data-k="incluso"' + (v.incluso ? ' checked' : '') + ' style="width:auto"> <span>Includi nelle altre voci: non la mostra come riga separata, il prezzo si spalma sulle altre.</span></label></td></tr>').join('');
   const cliTable = (d.cliente && d.cliente.length) ? '<div class="prevwrap"><table class="prevtbl">' + cliHead + '<tbody>' + cliBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessuna riga. Aggiungi le righe come le vedrà il cliente.</div>';
   const tipi = D('tipiLavoro').sort(byStr((x) => x.nome));
   const addTipo = tipi.length ? '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 0"><span class="small muted">Tipologia di lavoro:</span><select id="prevPickTipo"><option value="">— scegli —</option>' + tipi.map((t) => '<option value="' + esc(t.id) + '">' + esc(t.nome) + '</option>').join('') + '</select><button class="btn sm p" data-a="cliAddTipo">+ Aggiungi tipologia</button><span class="small muted">voci e importi predefiniti, poi modificabili</span></div>' : '';
@@ -2059,11 +2059,12 @@ A.cliAddListino = () => {
   if (!it) { toast('Scegli prima una voce dal listino.'); return; }
   if (it.scaglioni && it.scaglioni.length) {
     /* voce a scaglioni (es. fotovoltaico €/kW): prezzo al kW in automatico dalla potenza, con il ricarico cliente */
-    const q0 = num(it.scaglioni[0].da) || 1, ric = num(cd().ricaricoCliente);
+    const q0 = num(it.scaglioni[0].da) || 1, ric = it.ricIncluso ? 0 : num(cd().ricaricoCliente);
     S.prev.cliente.push({ id: uid(), nome: it.nome, um: it.um || 'kW', q: q0, pu: r2(pkwFor(it.scaglioni, q0) * (1 + ric / 100)), scaglioni: clone(it.scaglioni), puAuto: true, ricPct: ric, descrEstesa: descrStd(it), incluso: false, inPrev: true });
     queueRender(); return;
   }
-  const pu = (it.pu !== '' && it.pu != null) ? num(it.pu) : '';
+  /* prezzo cliente: quello indicato nel listino; se vuoto, costo + ricarico cliente (o il costo stesso se il margine è già incluso) */
+  const pu = (it.pu !== '' && it.pu != null) ? num(it.pu) : (num(it.cu) ? r2(num(it.cu) * (it.ricIncluso ? 1 : 1 + num(cd().ricaricoCliente) / 100)) : '');
   S.prev.cliente.push({ id: uid(), nome: it.nome, um: it.um || '', q: 1, pu: pu, descrEstesa: descrStd(it), incluso: false, inPrev: true }); queueRender();
 };
 A.cliDel = (d) => { if (S.prev && S.prev.cliente) { S.prev.cliente.splice(+d.i, 1); queueRender(); } };
@@ -2127,7 +2128,7 @@ A.listinoCat = () => {
   const rowsH = items.length ? items.map((it, j) => {
     const det = (it.scaglioni && it.scaglioni.length)
       ? 'a scaglioni €/kW · ' + it.scaglioni.map((s) => num(s.da) + '–' + num(s.a) + ' kW ' + eur2(s.pkw)).join(' · ')
-      : 'costo ' + eur2(it.cu) + (it.um ? '/' + esc(it.um) : '') + ' · cliente ' + (it.pu !== '' && it.pu != null ? eur2(it.pu) : 'auto');
+      : 'costo ' + eur2(it.cu) + (it.um ? '/' + esc(it.um) : '') + ' · cliente ' + (it.pu !== '' && it.pu != null ? eur2(it.pu) : 'auto') + (it.ricIncluso ? ' · margine incluso' : '');
     return '<div class="blk" style="justify-content:space-between;align-items:center;gap:8px"><div style="flex:1;min-width:0"><b>' + esc(it.nome) + '</b>' + (it.um ? ' <span class="small muted">' + esc(it.um) + '</span>' : '') + '<div class="small muted" style="white-space:normal">' + det + '</div></div><div class="row" style="gap:6px"><button class="btn sm" data-a="listinoEdit" data-j="' + j + '">Modifica</button><button class="btn sm" data-a="listinoCatDel" data-j="' + j + '">Togli</button></div></div>';
   }).join('') : '<div class="empty">Listino vuoto.</div>';
   openModal('<h2 style="margin-top:0">Listino prezzi</h2><p class="small muted" style="margin-top:0">Voci da usare nei preventivi con un clic. Le voci "a scaglioni" calcolano il costo €/kW in base alla potenza.</p>' + rowsH +
@@ -2146,6 +2147,7 @@ A.listinoEditRender = () => {
   const top = '<div class="fgrid"><div class="fld" style="flex:1 1 100%"><label>Nome voce</label><input data-in="lcEdit" data-k="nome" value="' + esc(e.nome) + '" placeholder="es. Impianto fotovoltaico"></div>' +
     '<div class="fld half"><label>Unità</label><input data-in="lcEdit" data-k="um" value="' + esc(e.um || '') + '" placeholder="' + (tiered ? 'kW' : 'pz, m, giorno') + '"></div>' +
     (tiered ? '' : '<div class="fld half"><label>Costo €</label><input type="number" step="any" inputmode="decimal" data-in="lcEdit" data-k="cu" value="' + esc(e.cu) + '"></div><div class="fld half"><label>Prezzo cliente € (vuoto = auto)</label><input type="number" step="any" inputmode="decimal" data-in="lcEdit" data-k="pu" value="' + esc(e.pu) + '"></div>') +
+    '<div class="fld" style="flex:1 1 100%"><label class="row" style="gap:6px;align-items:center;cursor:pointer"><input type="checkbox" data-in="lcChk" data-k="ricIncluso"' + (e.ricIncluso ? ' checked' : '') + ' style="width:auto;margin:0"> <span>Margine / ricarico già incluso nel prezzo (non applicare il ricarico cliente)</span></label></div>' +
     '<div class="fld" style="flex:1 1 100%"><label>Descrizione (facoltativa)</label><textarea data-in="lcEdit" data-k="descr" rows="2">' + esc(e.descr || '') + '</textarea></div></div>';
   let bands = '';
   if (tiered) {
@@ -2157,6 +2159,7 @@ A.listinoEditRender = () => {
     '<div class="row" style="flex-wrap:wrap;gap:8px;margin-top:12px"><button class="btn" data-a="listinoCat">Indietro</button><button class="btn p" data-a="lcSave">Salva voce</button></div>', true);
 };
 I.lcEdit = (ds, val) => { if (S.lcEdit) S.lcEdit[ds.k] = val; };
+I.lcChk = (ds, val, el) => { if (S.lcEdit) S.lcEdit[ds.k] = !!(el && el.checked); };
 I.lcBand = (ds, val) => { if (S.lcEdit && S.lcEdit.scaglioni && S.lcEdit.scaglioni[+ds.bi]) S.lcEdit.scaglioni[+ds.bi][ds.k] = val; };
 A.lcBandAdd = () => { if (S.lcEdit && S.lcEdit.scaglioni) { S.lcEdit.scaglioni.push({ da: '', a: '', pkw: '' }); A.listinoEditRender(); } };
 A.lcBandDel = (d) => { if (S.lcEdit && S.lcEdit.scaglioni) { S.lcEdit.scaglioni.splice(+d.bi, 1); A.listinoEditRender(); } };
@@ -2165,8 +2168,8 @@ A.lcSave = async () => {
   if (!(e.nome || '').trim()) { toast('Dai un nome alla voce.'); return; }
   const items = clone(listinoCat());
   const rec = e.scaglioni
-    ? { id: e.id || uid(), nome: e.nome.trim(), um: (e.um || 'kW').trim(), descr: (e.descr || '').trim(), scaglioni: e.scaglioni.map((s) => ({ da: num(s.da), a: num(s.a), pkw: num(s.pkw) })).filter((s) => s.pkw) }
-    : { id: e.id || uid(), nome: e.nome.trim(), um: (e.um || '').trim(), cu: num(e.cu), pu: (e.pu === '' || e.pu == null) ? '' : num(e.pu), descr: (e.descr || '').trim() };
+    ? { id: e.id || uid(), nome: e.nome.trim(), um: (e.um || 'kW').trim(), descr: (e.descr || '').trim(), scaglioni: e.scaglioni.map((s) => ({ da: num(s.da), a: num(s.a), pkw: num(s.pkw) })).filter((s) => s.pkw), ricIncluso: !!e.ricIncluso }
+    : { id: e.id || uid(), nome: e.nome.trim(), um: (e.um || '').trim(), cu: num(e.cu), pu: (e.pu === '' || e.pu == null) ? '' : num(e.pu), descr: (e.descr || '').trim(), ricIncluso: !!e.ricIncluso };
   if (e._idx >= 0) items[e._idx] = rec; else items.push(rec);
   try { await listinoCatSave(items); toast('Listino aggiornato.'); } catch (err) { toast('Salvataggio non riuscito.', 'err'); }
   S.lcEdit = null; queueRender(); A.listinoCat();
