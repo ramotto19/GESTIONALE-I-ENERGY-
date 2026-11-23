@@ -1743,8 +1743,8 @@ function cliPreviewHtml(d) {
   const showQ = d.mostraQta === true;
   const showPU = !!d.mostraPrezzoU;
   return lines.map((x) => {
-    const qStr = (showQ && x.um && num(x.q)) ? num(x.q) + ' ' + x.um : '';
-    const puStr = (showPU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) + '/' + x.um : '';
+    const qStr = (showQ && num(x.q)) ? (num(x.q) + (x.um ? ' ' + x.um : '')) : '';
+    const puStr = (showPU && num(x.q)) ? (eur2(r2(x.importo / num(x.q))) + (x.um ? '/' + x.um : '')) : '';
     const sub = [qStr, puStr].filter(Boolean).join(' · ');
     return '<div style="border-bottom:1px solid var(--ln);padding:8px 0">' +
       '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">' +
@@ -1937,8 +1937,8 @@ function preventivoHtml(c, o) {
   const showPU = !!d.mostraPrezzoU;
   const tdB = 'border-bottom:1px solid #e3e3e3';
   const righe = clientLines(d).map((x) => {
-    const qStr = (showQ && x.um && num(x.q)) ? num(x.q) + ' ' + x.um : '';
-    const puStr = (showPU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) + '/' + x.um : '';
+    const qStr = (showQ && num(x.q)) ? (num(x.q) + (x.um ? ' ' + x.um : '')) : '';
+    const puStr = (showPU && num(x.q)) ? (eur2(r2(x.importo / num(x.q))) + (x.um ? '/' + x.um : '')) : '';
     return '<tr>' +
       '<td style="padding:8px 10px;' + tdB + '"><b>' + esc(x.nome || '—') + '</b>' +
       (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') +
@@ -2006,8 +2006,8 @@ function confermaHtml(c, o) {
   const showPU = !!d.mostraPrezzoU;
   const tdC = 'border:1px solid #cfcfcf';
   const righe = clientLines(d).map((x) => {
-    const qStr = (showQ && x.um && num(x.q)) ? num(x.q) + ' ' + x.um : '';
-    const puStr = (showPU && x.um && num(x.q)) ? eur2(r2(x.importo / num(x.q))) + '/' + x.um : '';
+    const qStr = (showQ && num(x.q)) ? (num(x.q) + (x.um ? ' ' + x.um : '')) : '';
+    const puStr = (showPU && num(x.q)) ? (eur2(r2(x.importo / num(x.q))) + (x.um ? '/' + x.um : '')) : '';
     return '<tr>' +
       '<td style="padding:7px 9px;' + tdC + '"><b>' + esc(x.nome || '—') + '</b>' +
       (x.descrEstesa ? '<div style="font-size:11px;color:#444;white-space:pre-wrap;margin-top:3px">' + esc(x.descrEstesa) + '</div>' : '') +
