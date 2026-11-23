@@ -970,11 +970,12 @@ function nuovaCommessa(preset, after) {
   preset = preset || {};
   if (!preset.clienteId && !D('clienti').some((c) => statoCli(c) === 'ACQUISITO')) { toast('Serve almeno un cliente acquisito per creare una commessa. Segna un cliente come acquisito, oppure carica un’offerta e segnala l’accettazione.', 'err'); go('clienti'); return; }
   const docs = preset._docs; delete preset._docs;
+  const costiSeed = preset._costi; delete preset._costi;
   openForm({
     title: 'Nuova commessa', wide: true, info: 'L’iter (preventivo, conferma d’ordine, POS, DICO…) e la checklist di cantiere si creano da soli in base alle tipologie scelte.',
     fields: commessaFields(preset.clienteId), values: Object.assign({ codice: nextCodice(), stato: 'OFFERTA', aliquotaIva: 22 }, preset),
     folder: (out) => ['Commesse', out.codice || 'Nuova commessa'],
-    onSave: async (v) => { const id = newId('commesse'); await put('commesse', id, Object.assign({}, v, { iter: newIter(), fasi: [], sicurezza: [], pagamenti: [], costi: [], creataIl: today() }, docs ? { documentiAmm: docs } : {})); if (after) { try { await after(id); } catch (e) { /* il collegamento si rifà a mano */ } } go('commessa', id, 'panoramica'); }
+    onSave: async (v) => { const id = newId('commesse'); await put('commesse', id, Object.assign({}, v, { iter: newIter(), fasi: [], sicurezza: [], pagamenti: [], costi: (costiSeed && costiSeed.length) ? costiSeed : [], creataIl: today() }, docs ? { documentiAmm: docs } : {})); if (after) { try { await after(id); } catch (e) { /* il collegamento si rifà a mano */ } } go('commessa', id, 'panoramica'); }
   });
 }
 A.newC = () => nuovaCommessa({});
@@ -1195,27 +1196,38 @@ A.fotoDel = async (d) => {
 };
 const colDocComm = [{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo || lab(TIPI_DOC_COMM, x.tipo)) + '</b><div class="small muted">' + esc(lab(TIPI_DOC_COMM, x.tipo)) + '</div>' }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Scadenza', f: (x) => x.scadenza ? scadBadge(x.scadenza) : '<span class="muted">—</span>' }, { h: 'File', f: (x) => fileLink(x.file) }];
 /* ---------- costi della commessa: fatture, pedaggi, carburante, energia, manodopera ---------- */
-const CAT_COSTO = [['FORNITORE', 'Fattura fornitore', 'blue'], ['PEDAGGI', 'Pedaggi / altri costi', 'grey'], ['CARBURANTE', 'Carburante', 'amber'], ['ENERGIA', 'Energia', 'teal'], ['MANODOPERA', 'Manodopera', 'purple']];
+const CAT_COSTO = [['FORNITORE', 'Fattura fornitore', 'blue'], ['PEDAGGI', 'Pedaggi / altri costi', 'grey'], ['CARBURANTE', 'Carburante', 'amber'], ['ENERGIA', 'Energia', 'teal'], ['MANODOPERA', 'Manodopera', 'purple'], ['FV', 'Fotovoltaico', 'green'], ['POMPA', 'Pompa di calore', 'teal'], ['BATTERIA', 'Batteria', 'purple']];
 const ALIM = [['DIESEL', 'Diesel'], ['BENZINA', 'Benzina'], ['ELETTRICO', 'Elettrico']];
 /* parametri di partenza dei calcoli automatici: modificabili da "Parametri" (si salvano) e, caso per caso, nel modulo */
-const COSTI_DEF = { tariffaGiorno: 250, energiaKwh: 0.25, dieselConsumo: 7, dieselPrezzo: 1.75, benzinaConsumo: 8, benzinaPrezzo: 1.85, elettricoConsumo: 18, elettricoPrezzo: 0.3 };
+const COSTI_DEF = { tariffaGiorno: 250, maggWeekend: 30, energiaKwh: 0.25, batteriaKwh: 700, ricaricoCliente: 30, dieselConsumo: 7, dieselPrezzo: 1.75, benzinaConsumo: 8, benzinaPrezzo: 1.85, elettricoConsumo: 18, elettricoPrezzo: 0.3 };
+/* scaglioni €/kW di partenza (modificabili dal listino): il costo a scaglioni per FV e pompa. */
+const FV_SC_DEF = [{ da: 2, a: 4, pkw: 1400 }, { da: 4, a: 6, pkw: 1350 }, { da: 6, a: 10, pkw: 1200 }, { da: 10, a: 15, pkw: 1150 }, { da: 15, a: 50, pkw: 1000 }, { da: 50, a: 100, pkw: 980 }];
+const POMPA_SC_DEF = [{ da: 9, a: 9, pkw: 950 }, { da: 13, a: 13, pkw: 750 }, { da: 16, a: 16, pkw: 900 }];
+function scaglioniCosto(cat) { const id = cat === 'FV' ? 'fv' : cat === 'POMPA' ? 'pompa' : null; if (!id) return null; try { const it = (listinoCat() || []).find((x) => x.id === id); if (it && it.scaglioni && it.scaglioni.length) return it.scaglioni; } catch (e) {} return cat === 'FV' ? FV_SC_DEF : POMPA_SC_DEF; }
 const cd = () => { const c = CFG('costiDefault'), o = {}; Object.keys(COSTI_DEF).forEach((k) => { o[k] = c[k] !== '' && c[k] != null && !isNaN(+c[k]) ? +c[k] : COSTI_DEF[k]; }); return o; };
 const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 function calcCosto(cat, v) {
-  if (cat === 'MANODOPERA') return r2(num(v.lavoratori) * num(v.giorni) * num(v.tariffa));
+  if (cat === 'MANODOPERA') return r2(num(v.lavoratori) * (num(v.giorni) * num(v.tariffa) + num(v.giorniWe) * num(v.tariffa) * (1 + num(v.magg) / 100)));
   if (cat === 'CARBURANTE') return r2(num(v.kmGiorno) * num(v.giorni) * (num(v.consumo) / 100) * num(v.prezzo));
   if (cat === 'ENERGIA') return num(v.importo) > 0 ? r2(num(v.importo)) : r2(num(v.kwh) * num(v.prezzoKwh));
+  if (cat === 'FV' || cat === 'POMPA') return r2(num(v.kw) * num(v.prezzoKw));
+  if (cat === 'BATTERIA') return r2(num(v.kwh) * num(v.prezzoKwh));
   return r2(num(v.importo));
 }
 const COSTO_DESCR = (cat, v) => {
-  if (cat === 'MANODOPERA') return 'Manodopera: ' + num(v.lavoratori) + ' lavoratori × ' + num(v.giorni) + ' giorni × ' + eur(num(v.tariffa)) + '/giorno';
+  if (cat === 'MANODOPERA') return 'Manodopera: ' + num(v.lavoratori) + ' lavoratori × ' + num(v.giorni) + ' giorni' + (num(v.giorniWe) ? ' + ' + num(v.giorniWe) + ' weekend/festivi (+' + num(v.magg) + '%)' : '') + ' × ' + eur(num(v.tariffa)) + '/giorno';
   if (cat === 'CARBURANTE') { const m = v.mezzoId && G('mezzi', v.mezzoId); return 'Carburante ' + lab(ALIM, v.alimentazione).toLowerCase() + (m ? ' · ' + m.descrizione : '') + ': ' + num(v.kmGiorno) + ' km/giorno × ' + num(v.giorni) + ' giorni'; }
   if (cat === 'ENERGIA') return 'Energia' + (num(v.kwh) ? ': ' + num(v.kwh) + ' kWh' : '');
+  if (cat === 'FV') return 'Impianto fotovoltaico ' + num(v.kw) + ' kW';
+  if (cat === 'POMPA') return 'Pompa di calore ' + num(v.kw) + ' kW';
+  if (cat === 'BATTERIA') return 'Batteria di accumulo ' + num(v.kwh) + ' kWh';
   return '';
 };
 function costoFields(cat, c) {
   const d = cd(), mezzi = D('mezzi').filter((m) => m.attivo !== false && m.tipo !== 'ATTREZZATURA').sort(byStr((x) => x.descrizione)).map((m) => [m.id, mezzoLabel(m)]);
-  if (cat === 'MANODOPERA') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'lavoratori', l: 'N. lavoratori', t: 'number', req: true, half: true }, { k: 'giorni', l: 'N. giorni', t: 'number', req: true, half: true }, { k: 'tariffa', l: 'Costo per lavoratore al giorno (€)', t: 'number', req: true, half: true, hint: 'Predefinito ' + eur(d.tariffaGiorno) + ' (si cambia da “Parametri”, o qui solo per questa voce).' }, { k: 'descrizione', l: 'Descrizione (facoltativa)' }];
+  if (cat === 'MANODOPERA') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'lavoratori', l: 'N. lavoratori', t: 'number', req: true, half: true }, { k: 'giorni', l: 'N. giorni feriali', t: 'number', req: true, half: true }, { k: 'tariffa', l: 'Costo per lavoratore al giorno (€)', t: 'number', req: true, half: true, hint: 'Predefinito ' + eur(d.tariffaGiorno) + ' (si cambia da “Parametri”, o qui solo per questa voce).' }, { k: 'giorniWe', l: 'N. giorni weekend/festivi', t: 'number', half: true, hint: 'Lasciare 0 se non ce ne sono.' }, { k: 'magg', l: 'Maggiorazione weekend/festivi %', t: 'number', half: true, hint: 'Predefinita ' + d.maggWeekend + '%.' }, { k: 'descrizione', l: 'Descrizione (facoltativa)' }];
+  if (cat === 'FV' || cat === 'POMPA') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'kw', l: 'Potenza (kW)', t: 'number', req: true, half: true }, { k: 'prezzoKw', l: 'Costo €/kW', t: 'number', req: true, half: true, hint: 'Si compila da solo dagli scaglioni in base alla potenza; puoi correggerlo.' }, { k: 'descrizione', l: 'Descrizione (facoltativa)' }];
+  if (cat === 'BATTERIA') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'kwh', l: 'Capacità (kWh)', t: 'number', req: true, half: true }, { k: 'prezzoKwh', l: 'Costo €/kWh', t: 'number', req: true, half: true, hint: 'Predefinito ' + eur(d.batteriaKwh) + '/kWh.' }, { k: 'descrizione', l: 'Descrizione (facoltativa)' }];
   if (cat === 'CARBURANTE') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'mezzoId', l: 'Mezzo (facoltativo)', t: 'select', half: true, opts: mezzi }, { k: 'alimentazione', l: 'Tipo di mezzo', t: 'select', req: true, half: true, opts: ALIM }, { k: 'kmGiorno', l: 'Km al giorno', t: 'number', req: true, half: true }, { k: 'giorni', l: 'N. giorni', t: 'number', req: true, half: true }, { k: 'consumo', l: 'Consumo (l/100 km o kWh/100 km)', t: 'number', req: true, half: true }, { k: 'prezzo', l: 'Prezzo (€/l o €/kWh)', t: 'number', req: true, half: true }, { k: 'descrizione', l: 'Descrizione (facoltativa)' }];
   if (cat === 'ENERGIA') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'fornitore', l: 'Fornitore', half: true }, { k: 'kwh', l: 'Consumo (kWh)', t: 'number', half: true }, { k: 'prezzoKwh', l: 'Prezzo (€/kWh)', t: 'number', half: true, hint: 'Predefinito ' + eur(d.energiaKwh) + '/kWh.' }, { k: 'importo', l: 'Importo da fattura (€)', t: 'number', half: true, hint: 'Se hai la fattura scrivi qui l’importo: vale al posto del calcolo.' }, { k: 'file', l: 'Fattura (file)', t: 'file' }];
   if (cat === 'PEDAGGI') return [{ k: 'descrizione', l: 'Descrizione', req: true, ph: 'Es. pedaggi autostrada, parcheggi, noleggio' }, { k: 'data', l: 'Data', t: 'date', half: true }, { k: 'importo', l: 'Importo (€)', t: 'number', req: true, half: true }, { k: 'file', l: 'Ricevuta (file)', t: 'file' }];
@@ -1223,11 +1235,16 @@ function costoFields(cat, c) {
 }
 /* totale che si aggiorna mentre si compila il modulo e, per il carburante, valori di partenza da tipo di mezzo e mezzo scelto */
 function liveCostoForm(cat, nuovo) {
-  const f = document.getElementById('mform'); if (!f || !['MANODOPERA', 'CARBURANTE', 'ENERGIA'].includes(cat)) return;
+  const f = document.getElementById('mform'); if (!f || !['MANODOPERA', 'CARBURANTE', 'ENERGIA', 'FV', 'POMPA', 'BATTERIA'].includes(cat)) return;
   const box = document.createElement('div'); box.id = 'calcbox'; box.className = 'hint'; box.style.cssText = 'font-weight:700;margin-top:10px'; f.querySelector('.fgrid').after(box);
   const el = (k) => document.getElementById('f_' + k), val = (k) => (el(k) ? el(k).value.trim() : '');
   const set = (k, v) => { if (el(k)) el(k).value = v; };
-  const upd = () => { const keys = ['lavoratori', 'giorni', 'tariffa', 'kmGiorno', 'consumo', 'prezzo', 'kwh', 'prezzoKwh', 'importo']; const v = {}; keys.forEach((k) => { v[k] = val(k); }); const imp = calcCosto(cat, v); box.textContent = 'Costo calcolato: ' + eur(imp); };
+  const upd = () => { const keys = ['lavoratori', 'giorni', 'giorniWe', 'magg', 'tariffa', 'kmGiorno', 'consumo', 'prezzo', 'kwh', 'prezzoKwh', 'kw', 'prezzoKw', 'importo']; const v = {}; keys.forEach((k) => { v[k] = val(k); }); const imp = calcCosto(cat, v); box.textContent = 'Costo calcolato: ' + eur(imp); };
+  if (cat === 'FV' || cat === 'POMPA') {
+    const sc = scaglioniCosto(cat), fill = () => { const kw = num(val('kw')); if (kw > 0 && sc && sc.length) set('prezzoKw', pkwFor(sc, kw)); };
+    if (el('kw')) el('kw').addEventListener('input', () => { fill(); upd(); });
+    if (nuovo) fill();
+  }
   if (cat === 'CARBURANTE') {
     const d = cd(), pref = (a) => { const k = String(a || '').toLowerCase(); if (!k || d[k + 'Consumo'] == null) return; set('consumo', d[k + 'Consumo']); set('prezzo', d[k + 'Prezzo']); };
     if (el('alimentazione')) el('alimentazione').addEventListener('change', () => { pref(val('alimentazione')); upd(); });
@@ -1241,20 +1258,21 @@ function costoForm(cid, cat, i) {
   const nuovo = i == null || i === '', d = cd();
   let defaults = { categoria: cat, data: today() }, info = '';
   if (cat === 'MANODOPERA') {
-    defaults.tariffa = d.tariffaGiorno;
+    defaults.tariffa = d.tariffaGiorno; defaults.giorniWe = 0; defaults.magg = d.maggWeekend;
     const as = D('assegnazioni').filter((a) => a.commessaId === cid);
     if (as.length) { const sq = as.map((a) => (G('squadre', a.squadraId) || {}).membri || []); const lav = Math.max(1, Math.round(sq.reduce((t, m) => t + m.length, 0) / as.length)); defaults.lavoratori = lav; defaults.giorni = as.length * 5; info = 'Valori proposti dal planning: ' + as.length + (as.length === 1 ? ' settimana' : ' settimane') + ' assegnate (5 giorni l’una), circa ' + lav + ' lavoratori. Correggili se serve.'; }
   }
   if (cat === 'ENERGIA') defaults.prezzoKwh = d.energiaKwh;
+  if (cat === 'BATTERIA') defaults.prezzoKwh = d.batteriaKwh;
   if (cat === 'CARBURANTE') { defaults.alimentazione = 'DIESEL'; defaults.consumo = d.dieselConsumo; defaults.prezzo = d.dieselPrezzo; }
-  const map = (it) => { it.categoria = cat; it.importo = calcCosto(cat, it); if (['MANODOPERA', 'CARBURANTE', 'ENERGIA'].includes(cat) && !it.descrizione) it.descrizione = COSTO_DESCR(cat, it); if (cat === 'ENERGIA' && !it.descrizione) it.descrizione = 'Energia'; return it; };
+  const map = (it) => { it.categoria = cat; it.importo = calcCosto(cat, it); if (['MANODOPERA', 'CARBURANTE', 'ENERGIA', 'FV', 'POMPA', 'BATTERIA'].includes(cat) && !it.descrizione) it.descrizione = COSTO_DESCR(cat, it); if (cat === 'ENERGIA' && !it.descrizione) it.descrizione = 'Energia'; return it; };
   editSub({ col: 'commesse', id: cid, key: 'costi', i: nuovo ? null : i, title: lab(CAT_COSTO, cat), info, fields: costoFields(cat, c), defaults, map, folder: ['Commesse', commessaLabel(c), 'Costi'] });
   liveCostoForm(cat, nuovo);
 }
 A.costNewCat = (d) => costoForm(d.id, d.cat, null);
 A.costNew = (d) => costoForm(d.id, d.cat || 'FORNITORE', null);
 A.costEdit = (d) => { const c = G('commesse', d.id), x = c && (c.costi || [])[+d.i]; if (x) costoForm(d.id, x.categoria || 'FORNITORE', +d.i); };
-A.costiParam = () => { const d = cd(); openForm({ title: 'Parametri dei costi automatici', info: 'Valori di partenza per i calcoli: si possono comunque correggere voce per voce.', fields: [{ k: 'tariffaGiorno', l: 'Manodopera: € per lavoratore al giorno', t: 'number', req: true }, { k: 'energiaKwh', l: 'Energia: € per kWh', t: 'number', half: true }, { k: 'dieselConsumo', l: 'Diesel: consumo l/100 km', t: 'number', half: true }, { k: 'dieselPrezzo', l: 'Diesel: € al litro', t: 'number', half: true }, { k: 'benzinaConsumo', l: 'Benzina: consumo l/100 km', t: 'number', half: true }, { k: 'benzinaPrezzo', l: 'Benzina: € al litro', t: 'number', half: true }, { k: 'elettricoConsumo', l: 'Elettrico: consumo kWh/100 km', t: 'number', half: true }, { k: 'elettricoPrezzo', l: 'Elettrico: € al kWh', t: 'number', half: true }], values: d, onSave: (v) => put('impostazioni', 'costiDefault', v) }); };
+A.costiParam = () => { const d = cd(); openForm({ title: 'Parametri dei costi automatici', info: 'Valori di partenza per i calcoli: si possono comunque correggere voce per voce.', fields: [{ k: 'tariffaGiorno', l: 'Manodopera: € per lavoratore al giorno', t: 'number', req: true, half: true }, { k: 'maggWeekend', l: 'Maggiorazione weekend/festivi %', t: 'number', half: true }, { k: 'energiaKwh', l: 'Energia: € per kWh', t: 'number', half: true }, { k: 'batteriaKwh', l: 'Batteria: € per kWh', t: 'number', half: true }, { k: 'ricaricoCliente', l: 'Ricarico cliente predefinito %', t: 'number', half: true, hint: 'Usato quando aggiungi un costo anche al preventivo cliente.' }, { k: 'dieselConsumo', l: 'Diesel: consumo l/100 km', t: 'number', half: true }, { k: 'dieselPrezzo', l: 'Diesel: € al litro', t: 'number', half: true }, { k: 'benzinaConsumo', l: 'Benzina: consumo l/100 km', t: 'number', half: true }, { k: 'benzinaPrezzo', l: 'Benzina: € al litro', t: 'number', half: true }, { k: 'elettricoConsumo', l: 'Elettrico: consumo kWh/100 km', t: 'number', half: true }, { k: 'elettricoPrezzo', l: 'Elettrico: € al kWh', t: 'number', half: true }], values: d, onSave: (v) => put('impostazioni', 'costiDefault', v) }); };
 function tabEconomia(c) {
   const inc = incassatoC(c), prev = previstoC(c), costi = costiC(c);
   const pag = tbl([
@@ -1265,10 +1283,13 @@ function tabEconomia(c) {
     { h: 'Stato', f: (p) => stBadge(STATI_PAG, statoP(p)) },
     { h: '', f: (p, i) => '<div class="row"><button class="btn sm" data-a="incNew" data-id="' + esc(c.id) + '" data-i="' + i + '">Incasso</button><button class="btn sm" data-a="pagEdit" data-id="' + esc(c.id) + '" data-i="' + i + '">Modifica</button></div>' }
   ], c.pagamenti || [], { empty: 'Nessuna scadenza di pagamento. Aggiungi acconto, SAL e saldo.' });
-  const cst = tbl([{ h: 'Voce', f: (x) => '<b>' + esc(x.descrizione || lab(CAT_COSTO, x.categoria || 'FORNITORE')) + '</b><div class="small muted">' + esc([x.fornitore, x.numeroFattura ? 'fatt. ' + x.numeroFattura : ''].filter(Boolean).join(' · ')) + '</div>' }, { h: 'Tipo', f: (x) => stBadge(CAT_COSTO, x.categoria || 'FORNITORE') }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Importo', r: true, f: (x) => eur(x.importo) }, { h: 'File', f: (x) => fileLink(x.file) }], c.costi || [], { empty: 'Nessun costo registrato. Aggiungi fatture, pedaggi, carburante, energia o manodopera.', row: (x, i) => 'data-a="costEdit" data-id="' + esc(c.id) + '" data-i="' + i + '"' });
+  const diffCosto = (x) => { if (!x.daPreventivo || x.importoPreventivo == null) return ''; const dlt = r2(num(x.importo) - num(x.importoPreventivo)); if (!dlt) return '<div class="small" style="color:var(--mu)">in linea col preventivo</div>'; const up = dlt > 0; return '<div class="small" style="color:' + (up ? 'var(--red-tx)' : 'var(--green-tx,#2e7d32)') + '">' + (up ? '+' : '−') + eur(Math.abs(dlt)) + (up ? ' sopra' : ' sotto') + ' preventivo</div>'; };
+  const cst = tbl([{ h: 'Voce', f: (x) => '<b>' + esc(x.descrizione || lab(CAT_COSTO, x.categoria || 'FORNITORE')) + '</b>' + (x.daPreventivo ? ' <span class="badge" style="font-size:10px">da preventivo</span>' : '') + '<div class="small muted">' + esc([x.fornitore, x.numeroFattura ? 'fatt. ' + x.numeroFattura : ''].filter(Boolean).join(' · ')) + '</div>' }, { h: 'Tipo', f: (x) => stBadge(CAT_COSTO, x.categoria || 'FORNITORE') }, { h: 'Preventivato', r: true, f: (x) => (x.daPreventivo && x.importoPreventivo != null) ? eur(x.importoPreventivo) : '—' }, { h: 'Reale', r: true, f: (x) => '<b>' + eur(x.importo) + '</b>' + diffCosto(x) }, { h: 'File', f: (x) => fileLink(x.file) }], c.costi || [], { empty: 'Nessun costo registrato. Aggiungi fatture, pedaggi, carburante, energia o manodopera.', row: (x, i) => 'data-a="costEdit" data-id="' + esc(c.id) + '" data-i="' + i + '"' });
   const fP = fattureCom(c.id, 'P'), fA = fattureCom(c.id, 'A');
   const fRows = (arr) => arr.length ? '<div class="small muted" style="margin:8px 0 4px">' + (arr === fP ? 'Fatture dei fornitori (da Fatture)' : 'Fatture emesse al cliente (da Fatture)') + '</div>' + tbl([{ h: 'Fattura', f: (f) => '<b>' + esc(f.controparte || '') + '</b><div class="small muted">fatt. ' + esc(f.numero || '') + ' · ' + esc(fmtD(f.data)) + '</div>' }, { h: 'Imponibile', r: true, f: (f) => eur2(f.imponibile) }, { h: 'Stato', f: (f) => fatStato(f) }], arr, { row: (f) => 'data-a="fatEdit" data-id="' + esc(f.id) + '"' }) : '';
   const chipF = fP.length ? '<div class="row" style="margin:0 0 10px"><span class="badge amber">Fatture fornitori: ' + eur2(sum(fP, (f) => f.imponibile)) + '</span></div>' : '';
+  const costiPrev = (c.costi || []).filter((x) => x.daPreventivo && x.importoPreventivo != null);
+  const chipPrev = costiPrev.length ? (() => { const tp = r2(sum(costiPrev, (x) => num(x.importoPreventivo))), tr = r2(sum(costiPrev, (x) => num(x.importo))), dl = r2(tr - tp); const col = dl > 0 ? 'red' : (dl < 0 ? 'green' : 'grey'); return '<div class="row" style="flex-wrap:wrap;gap:8px;margin:0 0 10px"><span class="badge grey">Preventivato: ' + eur(tp) + '</span><span class="badge blue">Reale: ' + eur(tr) + '</span><span class="badge ' + col + '">' + (dl > 0 ? '+' : dl < 0 ? '−' : '±') + eur(Math.abs(dl)) + (dl > 0 ? ' sopra preventivo' : dl < 0 ? ' sotto preventivo' : ' in linea') + '</span></div>'; })() : '';
   const perCat = CAT_COSTO.map((k) => [k, sum((c.costi || []).filter((x) => (x.categoria || 'FORNITORE') === k[0]), (x) => x.importo)]).filter((r) => r[1] > 0);
   const chips = perCat.length ? '<div class="row" style="flex-wrap:wrap;gap:8px;margin:0 0 10px">' + perCat.map((r) => '<span class="badge ' + r[0][2] + '">' + esc(r[0][1]) + ': ' + eur(r[1]) + '</span>').join('') + '</div>' : '';
   const docsAmm = (c.documentiAmm || []).filter((x) => !TIPI_DOC_TEC.includes(x.tipo)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
@@ -1278,7 +1299,7 @@ function tabEconomia(c) {
   const docC = tbl(colDocComm, docsAmm.filter((x) => !OFF_T.includes(x.tipo)), { empty: 'Nessun documento caricato: contratto, conferma d’ordine, DICO…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
   const docT_unused = tbl(colDocComm, docsTec, { empty: 'Nessun documento caricato: progetti, valutazioni energetiche, bollette del cliente, schede tecniche dei materiali…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
   return '<div class="grid g4" style="margin-bottom:16px">' + kpi('Importo contratto', eur(c.importo), '+ IVA ' + (c.aliquotaIva || 0) + '%') + kpi('Incassato', eur(inc), (Number(c.importo) ? Math.round(100 * inc / Number(c.importo)) : 0) + '% del contratto') + kpi('Ancora da incassare', eur(Math.max(0, prev - inc)), 'Su scadenze registrate: ' + eur(prev)) + kpi('Margine attuale', eur(Number(c.importo) - costi), 'Costi registrati: ' + eur(costi)) + '</div><div class="stack">' +
-    card('Offerte e preventivi', docOff, '<button class="btn p sm" data-a="docOffNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Contratto e ordini', docC, '<button class="btn p sm" data-a="docCommNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Pagamenti e incassi', pag + fRows(fA), '<button class="btn p sm" data-a="pagNew" data-id="' + esc(c.id) + '">+ Pagamento</button>') + card('Costi e fornitori', chips + chipF + cst + fRows(fP), CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="costNewCat" data-id="' + esc(c.id) + '" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '')) + '</div>';
+    card('Offerte e preventivi', docOff, '<button class="btn p sm" data-a="docOffNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Contratto e ordini', docC, '<button class="btn p sm" data-a="docCommNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Pagamenti e incassi', pag + fRows(fA), '<button class="btn p sm" data-a="pagNew" data-id="' + esc(c.id) + '">+ Pagamento</button>') + card('Costi e fornitori', chipPrev + chips + chipF + cst + fRows(fP), CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="costNewCat" data-id="' + esc(c.id) + '" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '')) + '</div>';
 }
 A.pagNew = (d) => editSub({ col: 'commesse', id: d.id, key: 'pagamenti', title: 'Scadenza di pagamento', fields: pagFields(), defaults: { incassi: [] } });
 A.pagEdit = (d) => editSub({ col: 'commesse', id: d.id, key: 'pagamenti', i: d.i, title: 'Scadenza di pagamento', fields: pagFields() });
@@ -1542,7 +1563,11 @@ async function offAccettata(cid, oid) {
   if (!(await confirmBox('Offerta accettata. Segno “' + c.ragioneSociale + '” come cliente acquisito e creo la commessa con i dati dell’offerta?', 'Crea commessa'))) return;
   if (statoCli(c) !== 'ACQUISITO') { const d2 = clone(c); d2.stato = 'ACQUISITO'; applyLocalWrite('clienti', cid, d2); await patch('clienti', cid, { stato: 'ACQUISITO' }); }
   const serOff = serialParts(o.numero) ? String(o.numero).replace(/^OFF-/, '') : null;
-  const preset = { clienteId: cid, titolo: o.titolo, importo: o.importo, stato: 'ACQUISITA', _docs: o.file ? [{ id: uid(), tipo: 'OFFERTA_ACCETTATA', titolo: o.titolo, data: o.data || today(), file: o.file }] : undefined };
+  /* costi preventivati → costi della commessa: baseline da confermare o correggere, con l'importo
+     di preventivo tenuto a parte per evidenziare poi la differenza col costo reale. */
+  const pv = o.preventivo ? migraPrev(clone(o.preventivo)) : null;
+  const costiSeed = pv && pv.costi ? pv.costi.map((v) => Object.assign({}, v, { id: uid(), daPreventivo: true, importoPreventivo: costoImporto(v) })) : [];
+  const preset = { clienteId: cid, titolo: o.titolo, importo: o.importo, stato: 'ACQUISITA', _costi: costiSeed, _docs: o.file ? [{ id: uid(), tipo: 'OFFERTA_ACCETTATA', titolo: o.titolo, data: o.data || today(), file: o.file }] : undefined };
   if (serOff && !D('commesse').some((cm) => cm.codice === serOff)) preset.codice = serOff;
   nuovaCommessa(preset, async (id) => {
     const arr = clone(G('clienti', cid).offerte || []).map((x) => (x.id === oid ? Object.assign({}, x, { commessaId: id }) : x));
@@ -1666,20 +1691,28 @@ function migraVoce(v, d) {
         al cliente). Da qui in poi non sono più collegate riga per riga: cancellare o aggiungere
         da una parte non tocca l'altra. Il prezzo cliente viene "congelato" al valore di allora
         (prima era costo + ricarico), così resta indipendente dai costi. */
+/* importo di una riga di costo: le righe "a calcolo" (manodopera, carburante, energia) hanno già
+   importo salvato; le vecchie righe libere avevano q·cu. */
+function costoImporto(v) { return (v && v.importo != null && v.importo !== '') ? num(v.importo) : r2(num(v.q) * num(v.cu)); }
+/* porta una vecchia riga costo (nome/q/cu) al modello a categorie condiviso con la commessa. */
+function normCosto(v) {
+  if (v && v.importo != null && v.categoria) return v;
+  return { id: (v && v.id) || uid(), categoria: (v && v.categoria) || 'PEDAGGI', descrizione: (v && (v.descrizione || v.nome)) || 'Costo', importo: costoImporto(v || {}), data: (v && v.data) || '' };
+}
 function migraPrev(d) {
   if (!d) return d;
   if (!d._rig) { const orig = d.voci || []; d.voci = orig.map((v) => migraVoce(v, { voci: orig, margine: d.margine })); d._rig = true; }
   if (!d._v2) {
     const vs = d.voci || [];
-    d.costi = vs.map((v) => ({ id: uid(), nome: v.nome || 'Voce', um: v.um || '', q: num(v.q) || 1, cu: (v.cu === '' || v.cu == null) ? '' : num(v.cu) }));
+    d.costi = vs.map((v) => ({ id: uid(), categoria: 'PEDAGGI', descrizione: v.nome || 'Costo', importo: r2(num(v.q) * num(v.cu)), data: '' }));
     d.cliente = vs.filter((v) => v.inPrev !== false).map((v) => ({ id: uid(), nome: v.nome || 'Voce', um: v.um || '', q: num(v.q) || 1, pu: rigaPrezzoU(v, d), descrEstesa: v.descrEstesa || '', incluso: !!v.incluso, inPrev: true }));
-    d._v2 = true;
+    d._v2 = true; d._costiCat = true;
   }
   if (!d.costi) d.costi = [];
   if (!d.cliente) d.cliente = [];
+  if (!d._costiCat) { d.costi = d.costi.map(normCosto); d._costiCat = true; }
   return d;
 }
-function costoRiga(v) { return r2(num(v.q) * num(v.cu)); }
 function clienteRiga(v) { return r2(num(v.q) * num(v.pu)); }
 /* righe come le vede il cliente: le voci "incluse" spariscono e il loro importo si spalma sulle altre. */
 function clientLines(d) {
@@ -1704,7 +1737,7 @@ function nuovaVoce(tipo) {
 function nuovoPrev() { return { voci: [], margine: ld().margine, iva: ld().iva, sconto: 0, validitaGiorni: 30, antic: 30, meta: 40, saldo: 30, riferimento: '', intro: INTRO_DEF, note: '' }; }
 const prevTotals = (d) => {
   migraPrev(d);
-  const costi = r2((d.costi || []).reduce((s, v) => s + costoRiga(v), 0));
+  const costi = r2((d.costi || []).reduce((s, v) => s + costoImporto(v), 0));
   const imp = r2((d.cliente || []).filter((v) => v.inPrev !== false).reduce((s, v) => s + clienteRiga(v), 0));
   const sconto = r2(imp * num(d.sconto) / 100), netto = r2(imp - sconto), iva = r2(netto * num(d.iva) / 100);
   const utile = r2(netto - costi), margineEff = netto > 0 ? Math.round(utile / netto * 1000) / 10 : 0;
@@ -1817,17 +1850,15 @@ function vPreventivo() {
   const inp = (k, val, w) => '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="' + k + '" value="' + esc(val) + '" style="width:' + (w || 62) + 'px;display:inline-block;padding:4px 6px">';
   const metrica = (label, val, id) => '<div class="mcard"><div class="small muted" style="margin-bottom:2px">' + esc(label) + '</div><b id="' + id + '" style="font-size:15px">' + val + '</b></div>';
   const optCat = (idSel) => '<select id="' + idSel + '"><option value="">— dal listino —</option>' + cat.map((it, j) => '<option value="' + j + '">' + esc(it.nome) + (it.um ? ' (' + esc(it.um) + ')' : '') + '</option>').join('') + '</select>';
-  /* ---- AREA INTERNA (riservata): lista costi indipendente + riepilogo. Nascosta in "Vista cliente". ---- */
-  const costHead = '<thead><tr><th>Voce di costo</th><th class="n">Q.tà</th><th>Um</th><th class="n">Costo un.</th><th class="n">Costo riga</th><th></th></tr></thead>';
+  /* ---- AREA INTERNA (riservata): costi a categorie, stesse regole della commessa. ---- */
+  const costHead = '<thead><tr><th>Voce di costo</th><th>Tipo</th><th class="n">Importo</th><th></th></tr></thead>';
   const costBody = (d.costi || []).map((v, i) =>
-    '<tr><td><input class="nm" data-in="costEdit" data-i="' + i + '" data-k="nome" value="' + esc(v.nome) + '" placeholder="Es. Materiali (fattura), Manodopera…"></td>'
-    + '<td class="n"><input data-in="costEdit" data-i="' + i + '" data-k="q" value="' + esc(v.q) + '"></td>'
-    + '<td><input data-in="costEdit" data-i="' + i + '" data-k="um" value="' + esc(v.um) + '" placeholder="pz"></td>'
-    + '<td class="n"><input data-in="costEdit" data-i="' + i + '" data-k="cu" value="' + esc(v.cu) + '"></td>'
-    + '<td class="n" id="cst_' + v.id + '">' + eur2(costoRiga(v)) + '</td>'
-    + '<td class="n"><button class="xb" data-a="costDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>').join('');
-  const costTable = (d.costi && d.costi.length) ? '<div class="prevwrap"><table class="prevtbl">' + costHead + '<tbody>' + costBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessun costo. Aggiungi le tue voci di costo (anche una sola riga "Materiali" da fattura).</div>';
-  const addCost = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0"><span class="small muted">Aggiungi un costo:</span>' + optCat('prevPickCosto') + '<button class="btn sm p" data-a="costAddListino">+ Dal listino</button><button class="btn sm" data-a="costAdd">+ Riga costo</button></div>';
+    '<tr data-a="pCostEdit" data-i="' + i + '" style="cursor:pointer"><td><b>' + esc(v.descrizione || lab(CAT_COSTO, v.categoria || 'PEDAGGI')) + '</b>' + (v.data ? '<div class="small muted">' + esc(fmtD(v.data)) + '</div>' : '') + '</td>'
+    + '<td>' + stBadge(CAT_COSTO, v.categoria || 'PEDAGGI') + '</td>'
+    + '<td class="n">' + eur2(costoImporto(v)) + '</td>'
+    + '<td class="n"><button class="xb" data-a="pCostDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>').join('');
+  const costTable = (d.costi && d.costi.length) ? '<div class="prevwrap"><table class="prevtbl">' + costHead + '<tbody>' + costBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessun costo. Aggiungi i tuoi costi (anche una sola riga "Fattura fornitore" per i materiali).</div>';
+  const addCost = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0">' + CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="pCostNew" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '') + '</div>';
   const riepInterno = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px">'
     + metrica('Totale costi', eur2(T.costi), 'prevCosti')
     + metrica('Utile stimato', eur2(T.utile), 'prevUtile')
@@ -1848,7 +1879,9 @@ function vPreventivo() {
     + '<td class="n"><button class="xb" data-a="cliDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>'
     + '<tr class="drow"><td colspan="6"><textarea data-in="cliEdit" data-i="' + i + '" data-k="descrEstesa" rows="2" placeholder="Descrizione estesa (sotto la voce nel PDF cliente)">' + esc(v.descrEstesa || '') + '</textarea><label class="incl"><input type="checkbox" data-in="cliChk" data-i="' + i + '" data-k="incluso"' + (v.incluso ? ' checked' : '') + ' style="width:auto"> <span>Includi nelle altre voci: non la mostra come riga separata, il prezzo si spalma sulle altre.</span></label></td></tr>').join('');
   const cliTable = (d.cliente && d.cliente.length) ? '<div class="prevwrap"><table class="prevtbl">' + cliHead + '<tbody>' + cliBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessuna riga. Aggiungi le righe come le vedrà il cliente.</div>';
-  const addCli = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0"><span class="small muted">Aggiungi una riga:</span>' + optCat('prevPickCli') + '<button class="btn sm p" data-a="cliAddListino">+ Dal listino</button><button class="btn sm" data-a="cliAdd">+ Riga libera</button><button class="btn sm" data-a="listinoCat">Gestisci listino</button></div>';
+  const tipi = D('tipiLavoro').sort(byStr((x) => x.nome));
+  const addTipo = tipi.length ? '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 0"><span class="small muted">Tipologia di lavoro:</span><select id="prevPickTipo"><option value="">— scegli —</option>' + tipi.map((t) => '<option value="' + esc(t.id) + '">' + esc(t.nome) + '</option>').join('') + '</select><button class="btn sm p" data-a="cliAddTipo">+ Aggiungi tipologia</button><span class="small muted">voci e importi predefiniti, poi modificabili</span></div>' : '';
+  const addCli = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0"><span class="small muted">Aggiungi una riga:</span>' + optCat('prevPickCli') + '<button class="btn sm p" data-a="cliAddListino">+ Dal listino</button><button class="btn sm" data-a="cliAdd">+ Riga libera</button><button class="btn sm" data-a="listinoCat">Gestisci listino</button></div>' + addTipo;
   const cliPrev = '<section class="zprev zcli">'
     + '<div class="ch" style="align-items:flex-start"><div><h2 style="margin:0">📄 Preventivo cliente</h2><div class="small muted">Le righe come le vede il cliente: indipendenti dai costi qui sopra.</div></div>'
     + '<label class="row" style="gap:6px;align-items:center;font-size:13px;cursor:pointer;margin:0"><input type="checkbox" data-in="prevCliView"' + (cliView ? ' checked' : '') + ' style="width:auto;margin:0"> Anteprima cliente</label></div>'
@@ -1870,7 +1903,6 @@ function vPreventivo() {
 }
 function prevRecalc() {
   const d = S.prev; if (!d) return; migraPrev(d);
-  (d.costi || []).forEach((v) => { const e = document.getElementById('cst_' + v.id); if (e) e.textContent = eur2(costoRiga(v)); });
   (d.cliente || []).forEach((v) => { const e = document.getElementById('cli_' + v.id); if (e) e.textContent = eur2(clienteRiga(v)); });
   const T = prevTotals(d), set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = eur2(val); };
   set('prevCosti', T.costi); set('prevImp', T.imp); set('prevNetto', T.netto); set('prevIva', T.iva); set('prevTot', T.tot); set('prevUtile', T.utile);
@@ -1879,19 +1911,45 @@ function prevRecalc() {
   const rm = document.getElementById('prevRicMed'); if (rm) rm.textContent = T.ricMed + '%';
   const cp = document.getElementById('prevCliPrev'); if (cp) cp.innerHTML = cliPreviewHtml(d);
 }
-/* ---- Costi (area riservata): lista indipendente ---- */
-I.costEdit = (ds, val) => { const v = S.prev && S.prev.costi[+ds.i]; if (!v) return; v[ds.k] = val; prevRecalc(); };
-A.costAdd = () => { if (!S.prev) return; migraPrev(S.prev); S.prev.costi.push({ id: uid(), nome: '', um: '', q: 1, cu: '' }); queueRender(); };
-A.costAddListino = () => {
+/* ---- Costi del preventivo (area riservata): stesse categorie e regole della commessa ---- */
+function prevCostoForm(cat, i) {
   if (!S.prev) return; migraPrev(S.prev);
-  const sel = document.getElementById('prevPickCosto'), it = sel && sel.value !== '' ? listinoCat()[+sel.value] : null;
-  if (!it) { toast('Scegli prima una voce dal listino.'); return; }
-  let cu = '', q0 = 1, um = it.um || '';
-  if (it.scaglioni && it.scaglioni.length) { q0 = num(it.scaglioni[0].da) || 1; um = it.um || 'kW'; cu = pkwFor(it.scaglioni, q0); }
-  else if (it.cu !== '' && it.cu != null) cu = num(it.cu);
-  S.prev.costi.push({ id: uid(), nome: it.nome, um: um, q: q0, cu: cu }); queueRender();
-};
-A.costDel = (d) => { if (S.prev && S.prev.costi) { S.prev.costi.splice(+d.i, 1); queueRender(); } };
+  const c = G('clienti', S.id), nuovo = i == null || i === '', d = cd();
+  let defaults = { categoria: cat, data: today() };
+  if (cat === 'MANODOPERA') { defaults.tariffa = d.tariffaGiorno; defaults.giorniWe = 0; defaults.magg = d.maggWeekend; }
+  if (cat === 'ENERGIA') defaults.prezzoKwh = d.energiaKwh;
+  if (cat === 'BATTERIA') defaults.prezzoKwh = d.batteriaKwh;
+  if (cat === 'CARBURANTE') { defaults.alimentazione = 'DIESEL'; defaults.consumo = d.dieselConsumo; defaults.prezzo = d.dieselPrezzo; }
+  const cur = nuovo ? defaults : S.prev.costi[+i];
+  /* solo per voci nuove: opzione per generare subito anche la riga al cliente, col ricarico. */
+  const extra = nuovo ? [{ k: '_addCli', l: 'Aggiungi anche al preventivo cliente', t: 'checkbox' }, { k: '_ricCli', l: 'Ricarico cliente %', t: 'number', half: true, def: d.ricaricoCliente, hint: 'Prezzo cliente = costo × (1 + ricarico).' }] : [];
+  openForm({
+    title: lab(CAT_COSTO, cat), fields: costoFields(cat, c || {}).concat(extra), values: cur,
+    folder: c ? ['Clienti', c.ragioneSociale, 'Offerte e preventivi', 'Costi interni'] : undefined,
+    onSave: async (v) => {
+      const addCli = !!v._addCli, ric = num(v._ricCli);
+      let item = Object.assign({}, cur, v);
+      delete item._addCli; delete item._ricCli;
+      item.categoria = cat;
+      item.importo = calcCosto(cat, item);
+      if (['MANODOPERA', 'CARBURANTE', 'ENERGIA', 'FV', 'POMPA', 'BATTERIA'].includes(cat) && !item.descrizione) item.descrizione = COSTO_DESCR(cat, item);
+      if (cat === 'ENERGIA' && !item.descrizione) item.descrizione = 'Energia';
+      migraPrev(S.prev);
+      if (nuovo) { item.id = uid(); S.prev.costi.push(item); } else S.prev.costi[+i] = item;
+      if (addCli) {
+        let q = 1, um = '', puBase = num(item.importo) * (1 + ric / 100);
+        if (cat === 'FV' || cat === 'POMPA') { q = num(item.kw) || 1; um = 'kW'; puBase = num(item.prezzoKw) * (1 + ric / 100); }
+        else if (cat === 'BATTERIA') { q = num(item.kwh) || 1; um = 'kWh'; puBase = num(item.prezzoKwh) * (1 + ric / 100); }
+        S.prev.cliente.push({ id: uid(), nome: item.descrizione || lab(CAT_COSTO, cat), um: um, q: q, pu: r2(puBase), descrEstesa: '', incluso: false, inPrev: true });
+      }
+      closeModal(); queueRender();
+    }
+  });
+  liveCostoForm(cat, nuovo);
+}
+A.pCostNew = (d) => prevCostoForm(d.cat || 'FORNITORE', null);
+A.pCostEdit = (d) => { const v = S.prev && S.prev.costi[+d.i]; if (v) prevCostoForm(v.categoria || 'PEDAGGI', +d.i); };
+A.pCostDel = (d) => { if (S.prev && S.prev.costi) { S.prev.costi.splice(+d.i, 1); queueRender(); } };
 /* ---- Righe cliente: lista indipendente dai costi ---- */
 I.cliEdit = (ds, val) => { const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = val; prevRecalc(); };
 I.cliChk = (ds, val, el) => { const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = !!(el && el.checked); queueRender(); };
@@ -1904,6 +1962,31 @@ A.cliAddListino = () => {
   S.prev.cliente.push({ id: uid(), nome: it.nome, um: it.um || '', q: 1, pu: pu, descrEstesa: it.descr || '', incluso: false, inPrev: true }); queueRender();
 };
 A.cliDel = (d) => { if (S.prev && S.prev.cliente) { S.prev.cliente.splice(+d.i, 1); queueRender(); } };
+/* Preventivo cliente predefinito per una tipologia di lavoro: custom della tipologia, altrimenti
+   un default automatico per i tipi più comuni, altrimenti le fasi della tipologia (senza importo).
+   Gli importi sono indicativi: diventano righe cliente normali, modificabili e rimovibili. */
+function defaultPrevTipo(tipo) {
+  if (tipo && Array.isArray(tipo.preventivoDefault) && tipo.preventivoDefault.length) return tipo.preventivoDefault.map((r) => ({ descrizione: r.descrizione, importo: r.importo }));
+  const n = String((tipo && tipo.nome) || '').toLowerCase(), rif = /rifac|sostitu|rimoz/.test(n), R = (descrizione, importo) => ({ descrizione: descrizione, importo: importo });
+  if (/elettric/.test(n)) return rif ? [R('Rimozione impianto elettrico esistente e smaltimento', 1500), R('Nuove tracce, tubazioni e cassette', 2500), R('Stesura linee e cablaggi', 2200), R('Quadro elettrico nuovo e protezioni', 1200), R('Montaggio prese, interruttori e corpi illuminanti', 1800), R('Impianto di terra, collaudo e dichiarazione di conformità', 900)] : [R('Progetto e pratiche', 500), R('Tracce, tubazioni e cassette di derivazione', 2500), R('Stesura linee dorsali e terminali', 2200), R('Quadro elettrico generale e di zona', 1200), R('Montaggio prese, interruttori e corpi illuminanti', 1800), R('Impianto di terra, collaudo e dichiarazione di conformità (DiCo)', 900)];
+  if (/antincendio|rivelazione|sprinkler|idranti/.test(n)) return [R('Progetto e relazione tecnica antincendio', 800), R('Rete idranti / sprinkler: fornitura e posa', 4500), R('Rilevazione fumi: centrale, rivelatori e cablaggi', 3000), R('Segnaletica, estintori e porte REI', 1200), R('Collaudo, verifiche e certificazioni', 1000)];
+  if (/fotovolta|\bfv\b|solare/.test(n)) return [R('Progetto e pratiche GSE / distributore', 700), R('Strutture di sostegno e staffe', 1200), R('Fornitura e posa moduli fotovoltaici', 9000), R('Inverter, quadri e protezioni', 2200), R('Cablaggi, collaudo e messa in servizio', 1500)];
+  if (/riscald|caldaia|termic/.test(n)) return rif ? [R('Rimozione generatore e terminali esistenti', 1200), R('Nuove tubazioni di andata e ritorno', 2200), R('Nuovo generatore e allacciamento', 3500), R('Nuovi terminali (radiatori / fan coil)', 2000), R('Collaudo, messa in servizio e DiCo', 900)] : [R('Progetto e dimensionamento', 500), R('Tubazioni di andata e ritorno', 2200), R('Generatore (caldaia / pompa di calore) e allacciamento', 3500), R('Terminali: radiatori, pannelli o fan coil', 2000), R('Collaudo, messa in servizio e DiCo', 900)];
+  if (/idraul|idric|sanitar|bagno/.test(n)) return [R('Progetto e tracce', 600), R('Adduzione acqua fredda e calda', 1800), R('Scarichi e ventilazione', 1600), R('Sanitari e rubinetteria', 1500), R('Prova di tenuta, collaudo e consegna', 700)];
+  if (/climatizz|condizion|split|\bclima/.test(n)) return [R('Sopralluogo e dimensionamento', 400), R('Unità esterna e staffaggi', 1500), R('Unità interne (split / canalizzati)', 2000), R('Linee frigorifere e scarico condensa', 1500), R('Vuoto, carica gas, collaudo e DiCo', 800)];
+  if (/special|domotic|tvcc|antintrusione|dati|\brete|citofon/.test(n)) return [R('Progetto e predisposizioni', 600), R('Cablaggio strutturato dati e fonia', 1800), R('TVCC: telecamere, cablaggi e NVR', 2500), R('Antintrusione: centrale, sensori e sirene', 1800), R('Configurazione, collaudo e formazione', 900)];
+  const fasi = (tipo && (tipo.fasiNuovo && tipo.fasiNuovo.length ? tipo.fasiNuovo : tipo.fasiTemplate)) || [];
+  if (fasi.length) return fasi.map((f) => R(f.nome, ''));
+  return [R((tipo && tipo.nome) || 'Lavori', '')];
+}
+A.cliAddTipo = () => {
+  if (!S.prev) return; migraPrev(S.prev);
+  const sel = document.getElementById('prevPickTipo'), t = sel && sel.value ? G('tipiLavoro', sel.value) : null;
+  if (!t) { toast('Scegli prima una tipologia di lavoro.'); return; }
+  const rows = defaultPrevTipo(t);
+  rows.forEach((r) => S.prev.cliente.push({ id: uid(), nome: r.descrizione, um: '', q: 1, pu: (r.importo === '' || r.importo == null) ? '' : num(r.importo), descrEstesa: '', incluso: false, inPrev: true }));
+  queueRender(); toast(rows.length + (rows.length === 1 ? ' voce aggiunta' : ' voci aggiunte') + ' da “' + t.nome + '”. Modifica descrizioni e importi.');
+};
 I.prevEdit = (ds, val) => {
   const v = S.prev && S.prev.voci[+ds.vi]; if (!v) return;
   v[ds.k] = val;
@@ -2384,8 +2467,11 @@ A.ctlEdit = (d) => { const m = G('mezzi', d.id), i = (m.controlli || []).findInd
 
 /* --- tipologie di lavoro --- */
 const fasiToText = (f) => (f || []).map((x) => x.nome + ': ' + (x.voci || []).join('; ')).join('\n');
+/* preventivo cliente predefinito per tipologia: una voce per riga, "Descrizione | importo". */
+const prevDefToText = (arr) => (arr || []).map((r) => r.descrizione + (r.importo !== '' && r.importo != null ? ' | ' + r.importo : '')).join('\n');
+const textToPrevDef = (t) => String(t || '').split('\n').map((r) => r.trim()).filter(Boolean).map((r) => { const i = r.lastIndexOf('|'); if (i < 0) return { descrizione: r, importo: '' }; const ds = r.slice(0, i).trim(), imp = r.slice(i + 1).trim(); return { descrizione: ds, importo: imp === '' ? '' : num(imp) }; });
 const textToFasi = (t) => String(t || '').split('\n').map((r) => r.trim()).filter(Boolean).map((r) => { const i = r.indexOf(':'); const nome = (i >= 0 ? r.slice(0, i) : r).trim(); const voci = i >= 0 ? r.slice(i + 1).split(';').map((x) => x.trim()).filter(Boolean) : []; return { nome, peso: 1, voci }; });
-const tipoFields = () => [{ k: 'nome', l: 'Nome della tipologia', req: true, half: true }, { k: 'codice', l: 'Codice', half: true }, { k: 'abilitazioniRichieste', l: 'Formazione richiesta ai lavoratori', t: 'multi', opts: TIPI_AB.filter((x) => x[0] !== 'ALTRO').map((x) => [x[0], x[1]]) }, { k: 'docImpresaRichiesti', l: 'Documenti richiesti all’impresa', t: 'multi', opts: TIPI_DOC_AZ.filter((x) => x[0] !== 'ALTRO').map((x) => [x[0], x[1]]) }, { k: 'fasiNuovoTxt', l: 'Checklist - Nuova installazione (una fase per riga)', t: 'textarea', rows: 6, hint: 'Formato: Nome fase: attività 1; attività 2; attività 3. Lascia vuoto se questo tipo non distingue nuovo/rifacimento.' }, { k: 'fasiRifacimentoTxt', l: 'Checklist - Rifacimento (una fase per riga)', t: 'textarea', rows: 6, hint: 'Stesso formato. Lascia vuoto se non serve.' }];
+const tipoFields = () => [{ k: 'nome', l: 'Nome della tipologia', req: true, half: true }, { k: 'codice', l: 'Codice', half: true }, { k: 'abilitazioniRichieste', l: 'Formazione richiesta ai lavoratori', t: 'multi', opts: TIPI_AB.filter((x) => x[0] !== 'ALTRO').map((x) => [x[0], x[1]]) }, { k: 'docImpresaRichiesti', l: 'Documenti richiesti all’impresa', t: 'multi', opts: TIPI_DOC_AZ.filter((x) => x[0] !== 'ALTRO').map((x) => [x[0], x[1]]) }, { k: 'fasiNuovoTxt', l: 'Checklist - Nuova installazione (una fase per riga)', t: 'textarea', rows: 6, hint: 'Formato: Nome fase: attività 1; attività 2; attività 3. Lascia vuoto se questo tipo non distingue nuovo/rifacimento.' }, { k: 'fasiRifacimentoTxt', l: 'Checklist - Rifacimento (una fase per riga)', t: 'textarea', rows: 6, hint: 'Stesso formato. Lascia vuoto se non serve.' }, { k: 'preventivoDefaultTxt', l: 'Preventivo cliente predefinito (una voce per riga: Descrizione | importo)', t: 'textarea', rows: 6, hint: 'Usato quando aggiungi questa tipologia a un preventivo. Lascia vuoto per usare un default automatico.' }];
 function aTipologie() {
   const inc = {};
   D('commesse').forEach((c) => { const tp = c.tipiLavoro || []; if (!tp.length) return; const q = incassatoC(c) / tp.length; tp.forEach((id) => { inc[id] = (inc[id] || 0) + q; }); });
@@ -2393,8 +2479,8 @@ function aTipologie() {
   const t = tbl([{ h: 'Tipologia', f: (x) => '<b>' + esc(x.nome) + '</b>' }, { h: 'Formazione richiesta', f: (x) => esc((x.abilitazioniRichieste || []).map(abLabel).join(', ')) || '<span class="muted">—</span>' }, { h: 'Documenti impresa', f: (x) => esc((x.docImpresaRichiesti || []).map((k) => lab(TIPI_DOC_AZ, k)).join(', ')) || '<span class="muted">—</span>' }, { h: 'Checklist', f: (x) => (x.fasiNuovo || []).length || (x.fasiRifacimento || []).length ? esc((x.fasiNuovo || []).length + ' nuovo · ' + (x.fasiRifacimento || []).length + ' rifacimento') : nFasi(x) + ' fasi' }, { h: 'Commesse attive', r: true, f: (x) => D('commesse').filter((c) => ATTIVE.includes(c.stato) && (c.tipiLavoro || []).includes(x.id)).length }, { h: 'Incassato', r: true, f: (x) => eur(inc[x.id] || 0) }], D('tipiLavoro').sort(byStr((x) => x.nome)), { empty: 'Nessuna tipologia di lavoro.', row: (x) => 'data-a="tipEdit" data-id="' + esc(x.id) + '"' });
   return '<div class="muted small" style="margin-bottom:10px">Ogni tipologia definisce quali abilitazioni servono a impresa e lavoratori e le checklist di partenza per nuova installazione e rifacimento (si scelgono nella scheda Cantiere di ogni commessa). Requisiti indicativi: falli confermare dal consulente della sicurezza. Se una commessa ha più tipologie, l’incassato è ripartito in parti uguali.</div>' + card('Tipologie di lavoro', t, '<button class="btn p sm" data-a="tipNew">+ Tipologia</button>');
 }
-A.tipNew = () => openForm({ title: 'Nuova tipologia di lavoro', wide: true, fields: tipoFields(), values: {}, onSave: (v) => put('tipiLavoro', newId('tipiLavoro'), { nome: v.nome, codice: v.codice, abilitazioniRichieste: v.abilitazioniRichieste, docImpresaRichiesti: v.docImpresaRichiesti, fasiNuovo: textToFasi(v.fasiNuovoTxt), fasiRifacimento: textToFasi(v.fasiRifacimentoTxt) }) });
-A.tipEdit = (d) => { const x = G('tipiLavoro', d.id); openForm({ title: 'Tipologia di lavoro', wide: true, fields: tipoFields(), values: Object.assign({}, x, { fasiNuovoTxt: fasiToText(x.fasiNuovo && x.fasiNuovo.length ? x.fasiNuovo : x.fasiTemplate), fasiRifacimentoTxt: fasiToText(x.fasiRifacimento) }), onSave: (v) => patch('tipiLavoro', x.id, { nome: v.nome, codice: v.codice, abilitazioniRichieste: v.abilitazioniRichieste, docImpresaRichiesti: v.docImpresaRichiesti, fasiNuovo: textToFasi(v.fasiNuovoTxt), fasiRifacimento: textToFasi(v.fasiRifacimentoTxt) }), onDelete: S.admin ? () => remove('tipiLavoro', x.id) : null }); };
+A.tipNew = () => openForm({ title: 'Nuova tipologia di lavoro', wide: true, fields: tipoFields(), values: {}, onSave: (v) => put('tipiLavoro', newId('tipiLavoro'), { nome: v.nome, codice: v.codice, abilitazioniRichieste: v.abilitazioniRichieste, docImpresaRichiesti: v.docImpresaRichiesti, fasiNuovo: textToFasi(v.fasiNuovoTxt), fasiRifacimento: textToFasi(v.fasiRifacimentoTxt), preventivoDefault: textToPrevDef(v.preventivoDefaultTxt) }) });
+A.tipEdit = (d) => { const x = G('tipiLavoro', d.id); openForm({ title: 'Tipologia di lavoro', wide: true, fields: tipoFields(), values: Object.assign({}, x, { fasiNuovoTxt: fasiToText(x.fasiNuovo && x.fasiNuovo.length ? x.fasiNuovo : x.fasiTemplate), fasiRifacimentoTxt: fasiToText(x.fasiRifacimento), preventivoDefaultTxt: prevDefToText(x.preventivoDefault) }), onSave: (v) => patch('tipiLavoro', x.id, { nome: v.nome, codice: v.codice, abilitazioniRichieste: v.abilitazioniRichieste, docImpresaRichiesti: v.docImpresaRichiesti, fasiNuovo: textToFasi(v.fasiNuovoTxt), fasiRifacimento: textToFasi(v.fasiRifacimentoTxt), preventivoDefault: textToPrevDef(v.preventivoDefaultTxt) }), onDelete: S.admin ? () => remove('tipiLavoro', x.id) : null }); };
 
 /* ---------- documentale ---------- */
 const catPath = (id) => { const c = G('categorie', id); if (!c) return ''; const p = c.parentId && G('categorie', c.parentId); return p ? p.nome + ' / ' + c.nome : c.nome; };
