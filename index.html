@@ -1219,6 +1219,8 @@ A.fotoDel = async (d) => {
 };
 const colDocComm = [{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo || lab(TIPI_DOC_COMM, x.tipo)) + '</b><div class="small muted">' + esc(lab(TIPI_DOC_COMM, x.tipo)) + '</div>' }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Scadenza', f: (x) => x.scadenza ? scadBadge(x.scadenza) : '<span class="muted">—</span>' }, { h: 'File', f: (x) => fileLink(x.file) }];
 /* ---------- costi della commessa: fatture, pedaggi, carburante, energia, manodopera ---------- */
+/* categorie usate solo nel preventivo: non fanno parte dei costi di commessa (amministrazione) */
+const CAT_NO_COM = ['FV', 'POMPA', 'BATTERIA'];
 const CAT_COSTO = [['FORNITORE', 'Fattura fornitore', 'blue'], ['PEDAGGI', 'Pedaggi / altri costi', 'grey'], ['CARBURANTE', 'Carburante', 'amber'], ['ENERGIA', 'Energia', 'teal'], ['MANODOPERA', 'Manodopera', 'purple'], ['FV', 'Fotovoltaico', 'green'], ['POMPA', 'Pompa di calore', 'teal'], ['BATTERIA', 'Batteria', 'purple']];
 const ALIM = [['DIESEL', 'Diesel'], ['BENZINA', 'Benzina'], ['ELETTRICO', 'Elettrico']];
 /* parametri di partenza dei calcoli automatici: modificabili da "Parametri" (si salvano) e, caso per caso, nel modulo */
@@ -1338,7 +1340,7 @@ function tabEconomia(c) {
   const docC = tbl(colDocComm, docsAmm.filter((x) => !OFF_T.includes(x.tipo)), { empty: 'Nessun documento caricato: contratto, conferma d’ordine, DICO…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
   const docT_unused = tbl(colDocComm, docsTec, { empty: 'Nessun documento caricato: progetti, valutazioni energetiche, bollette del cliente, schede tecniche dei materiali…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
   return '<div class="grid g4" style="margin-bottom:16px">' + kpi('Importo contratto', eur(c.importo), '+ IVA ' + (c.aliquotaIva || 0) + '%') + kpi('Incassato', eur(inc), (Number(c.importo) ? Math.round(100 * inc / Number(c.importo)) : 0) + '% del contratto') + kpi('Ancora da incassare', eur(Math.max(0, prev - inc)), 'Su scadenze registrate: ' + eur(prev)) + kpi('Margine attuale', eur(Number(c.importo) - costi), 'Costi registrati: ' + eur(costi)) + '</div><div class="stack">' +
-    card('Offerte e preventivi', docOff, '<button class="btn p sm" data-a="docOffNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Contratto e ordini', docC, '<button class="btn p sm" data-a="docCommNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Pagamenti e incassi', pag + fRows(fA), '<button class="btn p sm" data-a="pagNew" data-id="' + esc(c.id) + '">+ Pagamento</button>') + card('Costi e fornitori', chipPrev + chips + chipF + cst + fRows(fP), CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="costNewCat" data-id="' + esc(c.id) + '" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '')) + '</div>';
+    card('Offerte e preventivi', docOff, '<button class="btn p sm" data-a="docOffNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Contratto e ordini', docC, '<button class="btn p sm" data-a="docCommNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Pagamenti e incassi', pag + fRows(fA), '<button class="btn p sm" data-a="pagNew" data-id="' + esc(c.id) + '">+ Pagamento</button>') + card('Costi e fornitori', chipPrev + chips + chipF + cst + fRows(fP), CAT_COSTO.filter((k) => !CAT_NO_COM.includes(k[0])).map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="costNewCat" data-id="' + esc(c.id) + '" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '')) + '</div>';
 }
 A.pagNew = (d) => editSub({ col: 'commesse', id: d.id, key: 'pagamenti', title: 'Scadenza di pagamento', fields: pagFields(), defaults: { incassi: [] } });
 A.pagEdit = (d) => editSub({ col: 'commesse', id: d.id, key: 'pagamenti', i: d.i, title: 'Scadenza di pagamento', fields: pagFields() });
@@ -1611,7 +1613,7 @@ async function offAccettata(cid, oid) {
   /* costi preventivati → costi della commessa: baseline da confermare o correggere, con l'importo
      di preventivo tenuto a parte per evidenziare poi la differenza col costo reale. */
   const pv = o.preventivo ? migraPrev(clone(o.preventivo)) : null;
-  const costiSeed = pv && pv.costi ? pv.costi.map((v) => Object.assign({}, v, { id: uid(), daPreventivo: true, importoPreventivo: costoImporto(v) })) : [];
+  const costiSeed = pv && pv.costi ? pv.costi.filter((v) => !CAT_NO_COM.includes(v.categoria)).map((v) => Object.assign({}, v, { id: uid(), daPreventivo: true, importoPreventivo: costoImporto(v) })) : [];
   const preset = { clienteId: cid, titolo: o.titolo, importo: o.importo, stato: 'ACQUISITA', _costi: costiSeed, _docs: o.file ? [{ id: uid(), tipo: 'OFFERTA_ACCETTATA', titolo: o.titolo, data: o.data || today(), file: o.file }] : undefined };
   if (serOff && !D('commesse').some((cm) => cm.codice === serOff)) preset.codice = serOff;
   nuovaCommessa(preset, async (id) => {
