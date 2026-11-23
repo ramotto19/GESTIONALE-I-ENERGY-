@@ -1812,15 +1812,16 @@ function nuovaVoce(tipo) {
   if (tipo === 'MANODOPERA') return Object.assign(base, { descrizione: 'Manodopera', persone: 1, giorni: '', giorniWe: 0, tariffa: d.manodoperaGiorno, magg: d.maggWeekend });
   return Object.assign(base, { imp: '' });
 }
-function nuovoPrev() { return { voci: [], margine: ld().margine, iva: ld().iva, sconto: 0, validitaGiorni: 30, antic: 30, meta: 40, saldo: 30, riferimento: '', intro: INTRO_DEF, note: '' }; }
+function nuovoPrev() { return { voci: [], margine: ld().margine, iva: ld().iva, sconto: 0, oneriSicPerc: 0, validitaGiorni: 30, antic: 30, meta: 40, saldo: 30, riferimento: '', intro: INTRO_DEF, note: '' }; }
 const prevTotals = (d) => {
   migraPrev(d);
   const costi = r2((d.costi || []).reduce((s, v) => s + costoImporto(v), 0));
   const imp = r2((d.cliente || []).filter((v) => v.inPrev !== false).reduce((s, v) => s + clienteRiga(v), 0));
-  const sconto = r2(imp * num(d.sconto) / 100), netto = r2(imp - sconto), iva = r2(netto * num(d.iva) / 100);
-  const utile = r2(netto - costi), margineEff = netto > 0 ? Math.round(utile / netto * 1000) / 10 : 0;
-  const ricMed = costi > 0 ? Math.round((netto / costi - 1) * 1000) / 10 : 0;
-  return { costi: costi, imp: imp, sconto: sconto, netto: netto, iva: iva, tot: r2(netto + iva), utile: utile, margineEff: margineEff, ricMed: ricMed };
+  /* oneri di sicurezza: percentuale sull'imponibile netto (dopo lo sconto), non soggetti a sconto; entrano nell'IVA e nel ricavo */
+  const sconto = r2(imp * num(d.sconto) / 100), netto = r2(imp - sconto), oneri = r2(netto * num(d.oneriSicPerc) / 100), base = r2(netto + oneri), iva = r2(base * num(d.iva) / 100);
+  const utile = r2(base - costi), margineEff = base > 0 ? Math.round(utile / base * 1000) / 10 : 0;
+  const ricMed = costi > 0 ? Math.round((base / costi - 1) * 1000) / 10 : 0;
+  return { costi: costi, imp: imp, sconto: sconto, netto: netto, oneri: oneri, base: base, iva: iva, tot: r2(base + iva), utile: utile, margineEff: margineEff, ricMed: ricMed };
 };
 const pfld = (l, inner, half) => '<div class="fld' + (half ? ' half' : '') + '"><label>' + esc(l) + '</label>' + inner + '</div>';
 /* scheda di una riga del preventivo (nuovo modello unico). */
@@ -1943,7 +1944,13 @@ function vPreventivo() {
     + metrica('Utile stimato', eur2(T.utile), 'prevUtile')
     + metrica('Margine effettivo', T.margineEff + '%', 'prevMargEff')
     + metrica('Ricarico medio', T.ricMed + '%', 'prevRicMed')
-    + '</div><div class="small muted" style="margin-top:6px">Confronto fra il totale dei tuoi costi e l’imponibile del preventivo cliente. Le due liste sono indipendenti.</div>';
+    + '</div>'
+    + '<div class="blk" style="margin-top:10px;flex-wrap:wrap;gap:8px;align-items:center"><b>Spalma i costi sulle voci del cliente</b>'
+    + '<select data-in="prevTop" data-k="spalmaMod" style="width:auto"><option value="ricarico"' + (d.spalmaMod === 'margine' ? '' : ' selected') + '>Ricarico sul costo</option><option value="margine"' + (d.spalmaMod === 'margine' ? ' selected' : '') + '>Margine sul prezzo</option></select>'
+    + inp('spalmaVal', (d.spalmaVal != null && d.spalmaVal !== '') ? d.spalmaVal : num(cd().ricaricoCliente), 70) + ' %'
+    + '<button class="btn sm p" data-a="prevSpalma">Applica alle voci cliente</button>'
+    + '<span class="small muted" id="prevSpalmaInfo">Imponibile da raggiungere ' + eur2(spalmaTarget(d, T).imp) + ' (ora ' + eur2(T.imp) + ')</span></div>'
+    + '<div class="small muted" style="margin-top:6px">Confronto fra il totale dei tuoi costi e l’imponibile del preventivo cliente. Le due liste sono indipendenti.</div>';
   const zonaInterna = cliView ? '' : '<section class="zprev zint">'
     + '<div class="ch" style="align-items:flex-start"><div><h2 style="margin:0">🔒 I miei costi <span class="small muted" style="font-weight:400">— area riservata</span></h2><div class="small muted">I tuoi costi reali, scollegati dalle righe mostrate al cliente. Non compaiono mai nel PDF.</div></div></div>'
     + costTable + addCost + addCostList + riepInterno + '</section>';
@@ -1972,6 +1979,7 @@ function vPreventivo() {
     '<div class="blk" style="justify-content:space-between"><span>Imponibile</span><b id="prevImp">' + eur2(T.imp) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between;align-items:center"><span>Sconto ' + inp('sconto', d.sconto || 0) + ' %</span><b id="prevSconto">− ' + eur2(T.sconto) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between"><span>Imponibile netto</span><b id="prevNetto">' + eur2(T.netto) + '</b></div>' +
+    '<div class="blk" style="justify-content:space-between;align-items:center"><span>Oneri di sicurezza ' + inp('oneriSicPerc', d.oneriSicPerc || 0) + ' % <span class="small muted">sull’imponibile netto</span></span><b id="prevOneri">' + eur2(T.oneri) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between;align-items:center"><span>IVA ' + inp('iva', d.iva) + ' %</span><b id="prevIva">' + eur2(T.iva) + '</b></div>' +
     '<div class="blk" style="justify-content:space-between;font-size:18px;border-top:2px solid var(--ln);padding-top:8px"><b>Totale</b><b id="prevTot">' + eur2(T.tot) + '</b></div>' + '</section>';
   const cond = card('Condizioni', pfld('N° offerta', '<input type="text" value="' + esc(offNum(o)) + '" disabled style="max-width:220px;background:#f3f3f3">', true) + pfld('Riferimento interno (facoltativo)', '<input type="text" data-in="prevTop" data-k="riferimento" value="' + esc(d.riferimento || '') + '" placeholder="es. vostro protocollo / ordine" style="max-width:220px">', true) + pfld('Validità (giorni)', '<input type="number" inputmode="numeric" data-in="prevTop" data-k="validitaGiorni" value="' + esc(d.validitaGiorni != null ? d.validitaGiorni : 30) + '" style="max-width:140px">', true) + pfld('Anticipo all’ordine %', '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="antic" value="' + esc(d.antic != null ? d.antic : '') + '" style="max-width:120px">', true) + pfld('A metà lavori %', '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="meta" value="' + esc(d.meta != null ? d.meta : '') + '" style="max-width:120px">', true) + pfld('Saldo %', '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="saldo" value="' + esc(d.saldo != null ? d.saldo : '') + '" style="max-width:120px">', true) + pfld('Premessa (in alto nel PDF)', '<textarea data-in="prevTop" data-k="intro" rows="3">' + esc(d.intro || '') + '</textarea>', false) + pfld('Tempi di realizzazione', '<textarea data-in="prevTop" data-k="tempi" rows="2">' + esc(d.tempi || '') + '</textarea>', false) + pfld('Esclusioni', '<textarea data-in="prevTop" data-k="esclusioni" rows="4">' + esc(d.esclusioni || '') + '</textarea>', false) + pfld('Note e condizioni (in fondo al PDF)', '<textarea data-in="prevTop" data-k="note" rows="3" placeholder="Altre note per il cliente…">' + esc(d.note || '') + '</textarea>', false));
@@ -1980,11 +1988,39 @@ function vPreventivo() {
   const noteBox = o.note ? '<section class="card" style="background:#fff7e0;border:1px solid #e6cf7a"><div class="small" style="font-weight:700;margin-bottom:4px;color:#8a6d1a">Note dell’offerta</div><div style="white-space:pre-wrap">' + esc(o.note) + '</div></section>' : '';
   return '<div class="hd"><div><button class="lnk" data-a="goRef" data-r="cliente" data-id="' + esc(c.id) + '">← ' + esc(c.ragioneSociale) + '</button><h1 style="margin-top:8px">Preventivo</h1><p class="sub">' + esc(o.titolo || 'Offerta') + '</p></div></div><div class="stack">' + noteBox + zonaInterna + cliPrev + cli + cond + docs + actions + '</div>';
 }
+/* ---- Spalmare i costi sulle voci del preventivo cliente ----
+   Dato un ricarico sul costo (o un margine sul prezzo) si ricava l'imponibile da raggiungere e lo si
+   distribuisce in proporzione sui prezzi attuali delle righe cliente (se non hanno ancora prezzi,
+   in parti uguali). Tiene conto di sconto e oneri di sicurezza, così il margine effettivo coincide. */
+function spalmaTarget(d, T) {
+  const p = num(d.spalmaVal != null && d.spalmaVal !== '' ? d.spalmaVal : cd().ricaricoCliente), margine = d.spalmaMod === 'margine';
+  const ricavo = margine ? (p < 100 ? T.costi / (1 - p / 100) : 0) : T.costi * (1 + p / 100);
+  const fSc = (1 - num(d.sconto) / 100) * (1 + num(d.oneriSicPerc) / 100);
+  return { p: p, margine: margine, imp: fSc > 0 ? r2(ricavo / fSc) : 0 };
+}
+A.prevSpalma = () => {
+  const d = S.prev; if (!d) return; migraPrev(d);
+  const T = prevTotals(d), tg = spalmaTarget(d, T), rows = (d.cliente || []).filter((v) => v.inPrev !== false);
+  if (!rows.length) { toast('Aggiungi prima le righe del preventivo cliente.', 'err'); return; }
+  if (!(T.costi > 0) || !(tg.imp > 0)) { toast('Servono dei costi e un ricarico valido per spalmare.', 'err'); return; }
+  const cur = rows.reduce((a, v) => a + clienteRiga(v), 0);
+  rows.forEach((v) => {
+    const q = num(v.q) || 1, imp = cur > 0 ? clienteRiga(v) * tg.imp / cur : tg.imp / rows.length;
+    v.pu = r2(imp / q); if (v.scaglioni) v.puAuto = false;
+  });
+  /* aggiusta l'ultima riga per assorbire gli arrotondamenti */
+  const diff = r2(tg.imp - rows.reduce((a, v) => a + clienteRiga(v), 0)), last = rows[rows.length - 1];
+  if (Math.abs(diff) >= 0.01 && num(last.q)) last.pu = r2(num(last.pu) + diff / num(last.q));
+  const T2 = prevTotals(d);
+  toast('Costi spalmati sulle voci: imponibile ' + eur2(T2.imp) + ' · margine effettivo ' + T2.margineEff + '%.');
+  queueRender();
+};
 function prevRecalc() {
   const d = S.prev; if (!d) return; migraPrev(d);
   (d.cliente || []).forEach((v) => { const e = document.getElementById('cli_' + v.id); if (e) e.textContent = eur2(clienteRiga(v)); });
   const T = prevTotals(d), set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = eur2(val); };
-  set('prevCosti', T.costi); set('prevImp', T.imp); set('prevNetto', T.netto); set('prevIva', T.iva); set('prevTot', T.tot); set('prevUtile', T.utile);
+  set('prevOneri', T.oneri); set('prevCosti', T.costi); set('prevImp', T.imp); set('prevNetto', T.netto); set('prevIva', T.iva); set('prevTot', T.tot); set('prevUtile', T.utile);
+  const si = document.getElementById('prevSpalmaInfo'); if (si) { const tg = spalmaTarget(d, T); si.textContent = 'Imponibile da raggiungere ' + eur2(tg.imp) + ' (ora ' + eur2(T.imp) + ')'; }
   const es = document.getElementById('prevSconto'); if (es) es.textContent = '− ' + eur2(T.sconto);
   const me = document.getElementById('prevMargEff'); if (me) me.textContent = T.margineEff + '%';
   const rm = document.getElementById('prevRicMed'); if (rm) rm.textContent = T.ricMed + '%';
@@ -2193,7 +2229,7 @@ A.prevSpec = (d) => { const v = S.prev && S.prev.voci[+d.vi]; if (!v) return; v.
 A.prevOpen = (d) => { const c = G('clienti', d.id); if (!c) return; const o = (c.offerte || []).find((x) => x.id === d.x); if (!o) { toast('Offerta non trovata.', 'err'); return; } S.prev = Object.assign(nuovoPrev(), clone(o.preventivo || {})); go('preventivo', d.id, d.x); };
 function rifAuto() { const now = new Date(), mm = String(now.getMonth() + 1).padStart(2, '0'); let n = 0; D('clienti').forEach((c) => (c.offerte || []).forEach((o) => { if (String((o.preventivo || {}).riferimento || '').indexOf(now.getFullYear() + '-' + mm) === 0) n++; })); return now.getFullYear() + '-' + mm + '-M' + String(n + 1).padStart(2, '0'); }
 A.prevNew = (d) => { const c = G('clienti', d.id); if (!c) return; openForm({ title: 'Nuovo preventivo', fields: [{ k: 'titolo', l: 'Oggetto dell’offerta', req: true, ph: 'Es. Impianto FV 6 kW + accumulo' }], values: {}, onSave: async (v) => { const pv = nuovoPrev(); const o = { id: uid(), numero: nextNumOff(), data: today(), esito: 'TRATTATIVA', titolo: v.titolo, preventivo: pv, documenti: [] }, arr = clone(G('clienti', d.id).offerte || []); arr.push(o); const doc2 = clone(G('clienti', d.id)); doc2.offerte = arr; applyLocalWrite('clienti', d.id, doc2); await patch('clienti', d.id, { offerte: arr }); S.prev = clone(pv); go('preventivo', d.id, o.id); } }); };
-A.prevSave = async (d) => { const arr = clone(G('clienti', d.id).offerte || []), i = arr.findIndex((x) => x.id === d.x); if (i < 0) { toast('Offerta non trovata.', 'err'); return; } const T = prevTotals(S.prev); arr[i].preventivo = clone(S.prev); arr[i].importo = T.imp; const doc2 = clone(G('clienti', d.id)); doc2.offerte = arr; applyLocalWrite('clienti', d.id, doc2); try { await patch('clienti', d.id, { offerte: arr }); toast('Preventivo salvato · al cliente ' + eur2(T.tot) + ' IVA inclusa · margine ' + T.margineEff + '%.'); } catch (e) { toast('Salvataggio non riuscito.', 'err'); } };
+A.prevSave = async (d) => { const arr = clone(G('clienti', d.id).offerte || []), i = arr.findIndex((x) => x.id === d.x); if (i < 0) { toast('Offerta non trovata.', 'err'); return; } const T = prevTotals(S.prev); arr[i].preventivo = clone(S.prev); arr[i].importo = r2(T.imp + T.oneri); const doc2 = clone(G('clienti', d.id)); doc2.offerte = arr; applyLocalWrite('clienti', d.id, doc2); try { await patch('clienti', d.id, { offerte: arr }); toast('Preventivo salvato · al cliente ' + eur2(T.tot) + ' IVA inclusa · margine ' + T.margineEff + '%.'); } catch (e) { toast('Salvataggio non riuscito.', 'err'); } };
 A.prevPdf = async (d) => { await A.prevSave(d); const c = G('clienti', d.id), o = (c.offerte || []).find((x) => x.id === d.x); if (o) printHtml(preventivoHtml(c, o), true, 'Offerta ' + (offNum(o) || c.ragioneSociale), true); };
 A.prevDocNew = (d) => { const c = G('clienti', d.id); if (!c) return; openForm({ title: 'Allega documento', info: 'Bolletta, progetto, foto di sopralluogo, scheda tecnica…', fields: [{ k: 'titolo', l: 'Titolo', req: true }, { k: 'tipo', l: 'Tipo', t: 'select', req: true, half: true, opts: DOC_TIPI }, { k: 'file', l: 'File', t: 'file' }], values: { tipo: 'BOLLETTA' }, folder: cliFolder(c).concat(['Offerte e preventivi', 'Documenti']), onSave: async (v) => { const arr = clone(G('clienti', d.id).offerte || []), i = arr.findIndex((x) => x.id === d.x); if (i < 0) return; arr[i].documenti = (arr[i].documenti || []).concat([{ id: uid(), titolo: v.titolo, tipo: v.tipo, file: v.file }]); const doc2 = clone(G('clienti', d.id)); doc2.offerte = arr; applyLocalWrite('clienti', d.id, doc2); await patch('clienti', d.id, { offerte: arr }); } }); };
 A.prevDocDel = async (d) => { if (!(await confirmBox('Togliere questo documento dall’offerta?', 'Togli'))) return; const arr = clone(G('clienti', S.id).offerte || []), i = arr.findIndex((x) => x.id === S.tab); if (i < 0) return; arr[i].documenti = (arr[i].documenti || []).filter((x) => x.id !== d.did); const doc2 = clone(G('clienti', S.id)); doc2.offerte = arr; applyLocalWrite('clienti', S.id, doc2); await patch('clienti', S.id, { offerte: arr }); };
@@ -2238,6 +2274,7 @@ function preventivoHtml(c, o) {
     '</tr></thead><tbody>' + righe + '</tbody></table>' +
     '<div style="margin-top:14px;margin-left:auto;width:280px;font-size:13px"><div style="display:flex;justify-content:space-between;padding:4px 0"><span>Imponibile</span><b>' + eur2(T.imp) + '</b></div>' +
     (num(d.sconto) ? '<div style="display:flex;justify-content:space-between;padding:4px 0"><span>Sconto ' + num(d.sconto) + '%</span><b>− ' + eur2(T.sconto) + '</b></div><div style="display:flex;justify-content:space-between;padding:4px 0"><span>Imponibile netto</span><b>' + eur2(T.netto) + '</b></div>' : '') +
+    (num(d.oneriSicPerc) ? '<div style="display:flex;justify-content:space-between;padding:4px 0"><span>Oneri di sicurezza ' + num(d.oneriSicPerc) + '%</span><b>' + eur2(T.oneri) + '</b></div>' : '') +
     '<div style="display:flex;justify-content:space-between;padding:4px 0"><span>IVA ' + num(d.iva) + '%</span><b>' + eur2(T.iva) + '</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #1b1f23;font-size:16px"><b>Totale</b><b>' + eur2(T.tot) + '</b></div></div>' +
     (function () { const pay = [num(d.antic) ? num(d.antic) + '% di anticipo all’ordine' : '', num(d.meta) ? num(d.meta) + '% a metà lavori' : '', num(d.saldo) ? num(d.saldo) + '% a saldo' : ''].filter(Boolean).join(', '); return pay ? '<div style="clear:both;margin-top:16px;font-size:12px;color:#333"><b>Pagamento:</b> ' + esc(pay) + '.</div>' : '<div style="clear:both;margin-top:16px"></div>'; })() +
     (num(d.validitaGiorni) ? '<div style="margin-top:6px;font-size:12px;color:#333"><b>Validità:</b> offerta valida ' + num(d.validitaGiorni) + ' giorni (fino al ' + esc(fmtD(addDays(o.data || today(), num(d.validitaGiorni)))) + ').</div>' : '') +
@@ -2305,7 +2342,7 @@ function confermaHtml(c, o) {
     (showPU ? '<th style="text-align:right;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff;white-space:nowrap">Prezzo un.</th>' : '') +
     '<th style="text-align:right;padding:7px 9px;border:1px solid #1b1f23;background:#1b1f23;color:#fff">Totale</th>' +
     '</tr></thead><tbody>' + righe +
-    totRow('Totale imponibile', T.imp) + (num(d.sconto) ? totRow('Sconto ' + num(d.sconto) + '%', -T.sconto) + totRow('Imponibile netto', T.netto) : '') + totRow('IVA ' + num(d.iva) + '%', T.iva) + totRow('Totale complessivo', T.tot, true) + '</tbody></table>' +
+    totRow('Totale imponibile', T.imp) + (num(d.sconto) ? totRow('Sconto ' + num(d.sconto) + '%', -T.sconto) + totRow('Imponibile netto', T.netto) : '') + (num(d.oneriSicPerc) ? totRow('Oneri di sicurezza ' + num(d.oneriSicPerc) + '%', T.oneri) : '') + totRow('IVA ' + num(d.iva) + '%', T.iva) + totRow('Totale complessivo', T.tot, true) + '</tbody></table>' +
     confArticoliHtml(d, a) + '</div>';
 }
 function confermaDoc(c, o) { return '<!doctype html><html><head><meta charset="utf-8"><style>@page{size:A4 portrait;margin:14mm}body{margin:0}</style></head><body>' + confermaHtml(c, o) + '</body></html>'; }
