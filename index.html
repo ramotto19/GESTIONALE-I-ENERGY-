@@ -125,6 +125,7 @@ input[type=file]{padding:6px}
 .vc.done span{text-decoration:line-through;color:var(--mu)}
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .ov.top{z-index:60;align-items:center}
+.picker-dialog-bg{z-index:2000!important}.picker-dialog{z-index:2001!important}
 /* mentre un modale è aperto blocchiamo lo scorrimento della pagina dietro: su telefono, scorrendo un
    form lungo, lo sfondo scorreva insieme e i suoi contenuti trasparivano sopra i campi (sembravano
    sovrapposti). Il body viene fissato e ripristinato alla chiusura. */
@@ -4231,6 +4232,10 @@ function getDriveToken(interactive) {
       else resolve(null);
     };
     driveTokenClient.error_callback = () => { driveTokenRequest = null; resolve(null); };
+    /* se la finestra di Google viene chiusa o bloccata senza che arrivi nessuna risposta, la richiesta
+       restava in sospeso per sempre e ogni "Sfoglia Drive" successivo aspettava invano: dopo 2 minuti si
+       azzera e si può riprovare. */
+    setTimeout(() => { if (driveTokenRequest) { driveTokenRequest = null; resolve(null); } }, 120000);
     try { driveTokenClient.requestAccessToken({ prompt: '' }); }
     catch (e) { driveTokenRequest = null; resolve(null); }
   });
@@ -4332,11 +4337,13 @@ let pickerLoadPromise = null;
 function loadPickerApi() {
   if (pickerLoadPromise) return pickerLoadPromise;
   pickerLoadPromise = new Promise((resolve, reject) => {
-    if (window.gapi && window.gapi.load) { gapi.load('picker', { callback: () => resolve() }); return; }
+    const fail = (msg) => { pickerLoadPromise = null; reject(new Error(msg)); };
+    setTimeout(() => fail('Il selettore di Google Drive non risponde: riprova tra poco.'), 15000);
+    if (window.gapi && window.gapi.load) { gapi.load('picker', { callback: () => resolve(), onerror: () => fail('Impossibile caricare il selettore di Google Drive.') }); return; }
     const s = document.createElement('script');
     s.src = 'https://apis.google.com/js/api.js'; s.async = true; s.defer = true;
-    s.onload = () => { gapi.load('picker', { callback: () => resolve() }); };
-    s.onerror = () => reject(new Error('Impossibile caricare il selettore di Google Drive.'));
+    s.onload = () => { gapi.load('picker', { callback: () => resolve(), onerror: () => fail('Impossibile caricare il selettore di Google Drive.') }); };
+    s.onerror = () => fail('Impossibile caricare il selettore di Google Drive.');
     document.head.appendChild(s);
   });
   return pickerLoadPromise;
@@ -4376,6 +4383,7 @@ function driveBrowseClick(btn) {
     if (!CONFIG.API_KEY) { toast('Selettore Drive non configurato: manca API_KEY in index.html.', 'err'); return; }
     try { await loadPickerApi(); } catch (e) { toast(e.message, 'err'); return; }
     const picked = await new Promise((resolve) => {
+     try {
       /* setParent('root') apre il selettore già dentro "Il mio Drive" (la struttura di cartelle
          vera e propria), invece della vista predefinita "Recenti" che mostra i file alla rinfusa
          senza tenere conto di come sono organizzati in cartelle. */
@@ -4383,6 +4391,7 @@ function driveBrowseClick(btn) {
       const picker = new google.picker.PickerBuilder()
         .addView(view)
         .setOAuthToken(token)
+        .setOrigin(window.location.protocol + '//' + window.location.host)
         .setDeveloperKey(CONFIG.API_KEY)
         .setTitle('Scegli un documento da Google Drive')
         .setCallback((data) => {
@@ -4395,6 +4404,7 @@ function driveBrowseClick(btn) {
         })
         .build();
       picker.setVisible(true);
+     } catch (e) { toast('Selettore Drive non disponibile: ' + (e && e.message || e), 'err'); resolve(null); }
     });
     if (!picked) return;
     const input = document.getElementById(targetId);
@@ -4424,6 +4434,7 @@ function driveBrowseMulti(btn) {
       const picker = new google.picker.PickerBuilder()
         .addView(view)
         .setOAuthToken(token)
+        .setOrigin(window.location.protocol + '//' + window.location.host)
         .setDeveloperKey(CONFIG.API_KEY)
         .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
         .setTitle('Scegli una o più foto da Google Drive')
