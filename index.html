@@ -1196,27 +1196,38 @@ A.fotoDel = async (d) => {
 };
 const colDocComm = [{ h: 'Documento', f: (x) => '<b>' + esc(x.titolo || lab(TIPI_DOC_COMM, x.tipo)) + '</b><div class="small muted">' + esc(lab(TIPI_DOC_COMM, x.tipo)) + '</div>' }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Scadenza', f: (x) => x.scadenza ? scadBadge(x.scadenza) : '<span class="muted">—</span>' }, { h: 'File', f: (x) => fileLink(x.file) }];
 /* ---------- costi della commessa: fatture, pedaggi, carburante, energia, manodopera ---------- */
-const CAT_COSTO = [['FORNITORE', 'Fattura fornitore', 'blue'], ['PEDAGGI', 'Pedaggi / altri costi', 'grey'], ['CARBURANTE', 'Carburante', 'amber'], ['ENERGIA', 'Energia', 'teal'], ['MANODOPERA', 'Manodopera', 'purple']];
+const CAT_COSTO = [['FORNITORE', 'Fattura fornitore', 'blue'], ['PEDAGGI', 'Pedaggi / altri costi', 'grey'], ['CARBURANTE', 'Carburante', 'amber'], ['ENERGIA', 'Energia', 'teal'], ['MANODOPERA', 'Manodopera', 'purple'], ['FV', 'Fotovoltaico', 'green'], ['POMPA', 'Pompa di calore', 'teal'], ['BATTERIA', 'Batteria', 'purple']];
 const ALIM = [['DIESEL', 'Diesel'], ['BENZINA', 'Benzina'], ['ELETTRICO', 'Elettrico']];
 /* parametri di partenza dei calcoli automatici: modificabili da "Parametri" (si salvano) e, caso per caso, nel modulo */
-const COSTI_DEF = { tariffaGiorno: 250, energiaKwh: 0.25, dieselConsumo: 7, dieselPrezzo: 1.75, benzinaConsumo: 8, benzinaPrezzo: 1.85, elettricoConsumo: 18, elettricoPrezzo: 0.3 };
+const COSTI_DEF = { tariffaGiorno: 250, maggWeekend: 30, energiaKwh: 0.25, batteriaKwh: 700, ricaricoCliente: 30, dieselConsumo: 7, dieselPrezzo: 1.75, benzinaConsumo: 8, benzinaPrezzo: 1.85, elettricoConsumo: 18, elettricoPrezzo: 0.3 };
+/* scaglioni €/kW di partenza (modificabili dal listino): il costo a scaglioni per FV e pompa. */
+const FV_SC_DEF = [{ da: 2, a: 4, pkw: 1400 }, { da: 4, a: 6, pkw: 1350 }, { da: 6, a: 10, pkw: 1200 }, { da: 10, a: 15, pkw: 1150 }, { da: 15, a: 50, pkw: 1000 }, { da: 50, a: 100, pkw: 980 }];
+const POMPA_SC_DEF = [{ da: 9, a: 9, pkw: 950 }, { da: 13, a: 13, pkw: 750 }, { da: 16, a: 16, pkw: 900 }];
+function scaglioniCosto(cat) { const id = cat === 'FV' ? 'fv' : cat === 'POMPA' ? 'pompa' : null; if (!id) return null; try { const it = (listinoCat() || []).find((x) => x.id === id); if (it && it.scaglioni && it.scaglioni.length) return it.scaglioni; } catch (e) {} return cat === 'FV' ? FV_SC_DEF : POMPA_SC_DEF; }
 const cd = () => { const c = CFG('costiDefault'), o = {}; Object.keys(COSTI_DEF).forEach((k) => { o[k] = c[k] !== '' && c[k] != null && !isNaN(+c[k]) ? +c[k] : COSTI_DEF[k]; }); return o; };
 const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 function calcCosto(cat, v) {
-  if (cat === 'MANODOPERA') return r2(num(v.lavoratori) * num(v.giorni) * num(v.tariffa));
+  if (cat === 'MANODOPERA') return r2(num(v.lavoratori) * (num(v.giorni) * num(v.tariffa) + num(v.giorniWe) * num(v.tariffa) * (1 + num(v.magg) / 100)));
   if (cat === 'CARBURANTE') return r2(num(v.kmGiorno) * num(v.giorni) * (num(v.consumo) / 100) * num(v.prezzo));
   if (cat === 'ENERGIA') return num(v.importo) > 0 ? r2(num(v.importo)) : r2(num(v.kwh) * num(v.prezzoKwh));
+  if (cat === 'FV' || cat === 'POMPA') return r2(num(v.kw) * num(v.prezzoKw));
+  if (cat === 'BATTERIA') return r2(num(v.kwh) * num(v.prezzoKwh));
   return r2(num(v.importo));
 }
 const COSTO_DESCR = (cat, v) => {
-  if (cat === 'MANODOPERA') return 'Manodopera: ' + num(v.lavoratori) + ' lavoratori × ' + num(v.giorni) + ' giorni × ' + eur(num(v.tariffa)) + '/giorno';
+  if (cat === 'MANODOPERA') return 'Manodopera: ' + num(v.lavoratori) + ' lavoratori × ' + num(v.giorni) + ' giorni' + (num(v.giorniWe) ? ' + ' + num(v.giorniWe) + ' weekend/festivi (+' + num(v.magg) + '%)' : '') + ' × ' + eur(num(v.tariffa)) + '/giorno';
   if (cat === 'CARBURANTE') { const m = v.mezzoId && G('mezzi', v.mezzoId); return 'Carburante ' + lab(ALIM, v.alimentazione).toLowerCase() + (m ? ' · ' + m.descrizione : '') + ': ' + num(v.kmGiorno) + ' km/giorno × ' + num(v.giorni) + ' giorni'; }
   if (cat === 'ENERGIA') return 'Energia' + (num(v.kwh) ? ': ' + num(v.kwh) + ' kWh' : '');
+  if (cat === 'FV') return 'Impianto fotovoltaico ' + num(v.kw) + ' kW';
+  if (cat === 'POMPA') return 'Pompa di calore ' + num(v.kw) + ' kW';
+  if (cat === 'BATTERIA') return 'Batteria di accumulo ' + num(v.kwh) + ' kWh';
   return '';
 };
 function costoFields(cat, c) {
   const d = cd(), mezzi = D('mezzi').filter((m) => m.attivo !== false && m.tipo !== 'ATTREZZATURA').sort(byStr((x) => x.descrizione)).map((m) => [m.id, mezzoLabel(m)]);
-  if (cat === 'MANODOPERA') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'lavoratori', l: 'N. lavoratori', t: 'number', req: true, half: true }, { k: 'giorni', l: 'N. giorni', t: 'number', req: true, half: true }, { k: 'tariffa', l: 'Costo per lavoratore al giorno (€)', t: 'number', req: true, half: true, hint: 'Predefinito ' + eur(d.tariffaGiorno) + ' (si cambia da “Parametri”, o qui solo per questa voce).' }, { k: 'descrizione', l: 'Descrizione (facoltativa)' }];
+  if (cat === 'MANODOPERA') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'lavoratori', l: 'N. lavoratori', t: 'number', req: true, half: true }, { k: 'giorni', l: 'N. giorni feriali', t: 'number', req: true, half: true }, { k: 'tariffa', l: 'Costo per lavoratore al giorno (€)', t: 'number', req: true, half: true, hint: 'Predefinito ' + eur(d.tariffaGiorno) + ' (si cambia da “Parametri”, o qui solo per questa voce).' }, { k: 'giorniWe', l: 'N. giorni weekend/festivi', t: 'number', half: true, hint: 'Lasciare 0 se non ce ne sono.' }, { k: 'magg', l: 'Maggiorazione weekend/festivi %', t: 'number', half: true, hint: 'Predefinita ' + d.maggWeekend + '%.' }, { k: 'descrizione', l: 'Descrizione (facoltativa)' }];
+  if (cat === 'FV' || cat === 'POMPA') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'kw', l: 'Potenza (kW)', t: 'number', req: true, half: true }, { k: 'prezzoKw', l: 'Costo €/kW', t: 'number', req: true, half: true, hint: 'Si compila da solo dagli scaglioni in base alla potenza; puoi correggerlo.' }, { k: 'descrizione', l: 'Descrizione (facoltativa)' }];
+  if (cat === 'BATTERIA') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'kwh', l: 'Capacità (kWh)', t: 'number', req: true, half: true }, { k: 'prezzoKwh', l: 'Costo €/kWh', t: 'number', req: true, half: true, hint: 'Predefinito ' + eur(d.batteriaKwh) + '/kWh.' }, { k: 'descrizione', l: 'Descrizione (facoltativa)' }];
   if (cat === 'CARBURANTE') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'mezzoId', l: 'Mezzo (facoltativo)', t: 'select', half: true, opts: mezzi }, { k: 'alimentazione', l: 'Tipo di mezzo', t: 'select', req: true, half: true, opts: ALIM }, { k: 'kmGiorno', l: 'Km al giorno', t: 'number', req: true, half: true }, { k: 'giorni', l: 'N. giorni', t: 'number', req: true, half: true }, { k: 'consumo', l: 'Consumo (l/100 km o kWh/100 km)', t: 'number', req: true, half: true }, { k: 'prezzo', l: 'Prezzo (€/l o €/kWh)', t: 'number', req: true, half: true }, { k: 'descrizione', l: 'Descrizione (facoltativa)' }];
   if (cat === 'ENERGIA') return [{ k: 'data', l: 'Data', t: 'date', half: true }, { k: 'fornitore', l: 'Fornitore', half: true }, { k: 'kwh', l: 'Consumo (kWh)', t: 'number', half: true }, { k: 'prezzoKwh', l: 'Prezzo (€/kWh)', t: 'number', half: true, hint: 'Predefinito ' + eur(d.energiaKwh) + '/kWh.' }, { k: 'importo', l: 'Importo da fattura (€)', t: 'number', half: true, hint: 'Se hai la fattura scrivi qui l’importo: vale al posto del calcolo.' }, { k: 'file', l: 'Fattura (file)', t: 'file' }];
   if (cat === 'PEDAGGI') return [{ k: 'descrizione', l: 'Descrizione', req: true, ph: 'Es. pedaggi autostrada, parcheggi, noleggio' }, { k: 'data', l: 'Data', t: 'date', half: true }, { k: 'importo', l: 'Importo (€)', t: 'number', req: true, half: true }, { k: 'file', l: 'Ricevuta (file)', t: 'file' }];
@@ -1224,11 +1235,16 @@ function costoFields(cat, c) {
 }
 /* totale che si aggiorna mentre si compila il modulo e, per il carburante, valori di partenza da tipo di mezzo e mezzo scelto */
 function liveCostoForm(cat, nuovo) {
-  const f = document.getElementById('mform'); if (!f || !['MANODOPERA', 'CARBURANTE', 'ENERGIA'].includes(cat)) return;
+  const f = document.getElementById('mform'); if (!f || !['MANODOPERA', 'CARBURANTE', 'ENERGIA', 'FV', 'POMPA', 'BATTERIA'].includes(cat)) return;
   const box = document.createElement('div'); box.id = 'calcbox'; box.className = 'hint'; box.style.cssText = 'font-weight:700;margin-top:10px'; f.querySelector('.fgrid').after(box);
   const el = (k) => document.getElementById('f_' + k), val = (k) => (el(k) ? el(k).value.trim() : '');
   const set = (k, v) => { if (el(k)) el(k).value = v; };
-  const upd = () => { const keys = ['lavoratori', 'giorni', 'tariffa', 'kmGiorno', 'consumo', 'prezzo', 'kwh', 'prezzoKwh', 'importo']; const v = {}; keys.forEach((k) => { v[k] = val(k); }); const imp = calcCosto(cat, v); box.textContent = 'Costo calcolato: ' + eur(imp); };
+  const upd = () => { const keys = ['lavoratori', 'giorni', 'giorniWe', 'magg', 'tariffa', 'kmGiorno', 'consumo', 'prezzo', 'kwh', 'prezzoKwh', 'kw', 'prezzoKw', 'importo']; const v = {}; keys.forEach((k) => { v[k] = val(k); }); const imp = calcCosto(cat, v); box.textContent = 'Costo calcolato: ' + eur(imp); };
+  if (cat === 'FV' || cat === 'POMPA') {
+    const sc = scaglioniCosto(cat), fill = () => { const kw = num(val('kw')); if (kw > 0 && sc && sc.length) set('prezzoKw', pkwFor(sc, kw)); };
+    if (el('kw')) el('kw').addEventListener('input', () => { fill(); upd(); });
+    if (nuovo) fill();
+  }
   if (cat === 'CARBURANTE') {
     const d = cd(), pref = (a) => { const k = String(a || '').toLowerCase(); if (!k || d[k + 'Consumo'] == null) return; set('consumo', d[k + 'Consumo']); set('prezzo', d[k + 'Prezzo']); };
     if (el('alimentazione')) el('alimentazione').addEventListener('change', () => { pref(val('alimentazione')); upd(); });
@@ -1242,20 +1258,21 @@ function costoForm(cid, cat, i) {
   const nuovo = i == null || i === '', d = cd();
   let defaults = { categoria: cat, data: today() }, info = '';
   if (cat === 'MANODOPERA') {
-    defaults.tariffa = d.tariffaGiorno;
+    defaults.tariffa = d.tariffaGiorno; defaults.giorniWe = 0; defaults.magg = d.maggWeekend;
     const as = D('assegnazioni').filter((a) => a.commessaId === cid);
     if (as.length) { const sq = as.map((a) => (G('squadre', a.squadraId) || {}).membri || []); const lav = Math.max(1, Math.round(sq.reduce((t, m) => t + m.length, 0) / as.length)); defaults.lavoratori = lav; defaults.giorni = as.length * 5; info = 'Valori proposti dal planning: ' + as.length + (as.length === 1 ? ' settimana' : ' settimane') + ' assegnate (5 giorni l’una), circa ' + lav + ' lavoratori. Correggili se serve.'; }
   }
   if (cat === 'ENERGIA') defaults.prezzoKwh = d.energiaKwh;
+  if (cat === 'BATTERIA') defaults.prezzoKwh = d.batteriaKwh;
   if (cat === 'CARBURANTE') { defaults.alimentazione = 'DIESEL'; defaults.consumo = d.dieselConsumo; defaults.prezzo = d.dieselPrezzo; }
-  const map = (it) => { it.categoria = cat; it.importo = calcCosto(cat, it); if (['MANODOPERA', 'CARBURANTE', 'ENERGIA'].includes(cat) && !it.descrizione) it.descrizione = COSTO_DESCR(cat, it); if (cat === 'ENERGIA' && !it.descrizione) it.descrizione = 'Energia'; return it; };
+  const map = (it) => { it.categoria = cat; it.importo = calcCosto(cat, it); if (['MANODOPERA', 'CARBURANTE', 'ENERGIA', 'FV', 'POMPA', 'BATTERIA'].includes(cat) && !it.descrizione) it.descrizione = COSTO_DESCR(cat, it); if (cat === 'ENERGIA' && !it.descrizione) it.descrizione = 'Energia'; return it; };
   editSub({ col: 'commesse', id: cid, key: 'costi', i: nuovo ? null : i, title: lab(CAT_COSTO, cat), info, fields: costoFields(cat, c), defaults, map, folder: ['Commesse', commessaLabel(c), 'Costi'] });
   liveCostoForm(cat, nuovo);
 }
 A.costNewCat = (d) => costoForm(d.id, d.cat, null);
 A.costNew = (d) => costoForm(d.id, d.cat || 'FORNITORE', null);
 A.costEdit = (d) => { const c = G('commesse', d.id), x = c && (c.costi || [])[+d.i]; if (x) costoForm(d.id, x.categoria || 'FORNITORE', +d.i); };
-A.costiParam = () => { const d = cd(); openForm({ title: 'Parametri dei costi automatici', info: 'Valori di partenza per i calcoli: si possono comunque correggere voce per voce.', fields: [{ k: 'tariffaGiorno', l: 'Manodopera: € per lavoratore al giorno', t: 'number', req: true }, { k: 'energiaKwh', l: 'Energia: € per kWh', t: 'number', half: true }, { k: 'dieselConsumo', l: 'Diesel: consumo l/100 km', t: 'number', half: true }, { k: 'dieselPrezzo', l: 'Diesel: € al litro', t: 'number', half: true }, { k: 'benzinaConsumo', l: 'Benzina: consumo l/100 km', t: 'number', half: true }, { k: 'benzinaPrezzo', l: 'Benzina: € al litro', t: 'number', half: true }, { k: 'elettricoConsumo', l: 'Elettrico: consumo kWh/100 km', t: 'number', half: true }, { k: 'elettricoPrezzo', l: 'Elettrico: € al kWh', t: 'number', half: true }], values: d, onSave: (v) => put('impostazioni', 'costiDefault', v) }); };
+A.costiParam = () => { const d = cd(); openForm({ title: 'Parametri dei costi automatici', info: 'Valori di partenza per i calcoli: si possono comunque correggere voce per voce.', fields: [{ k: 'tariffaGiorno', l: 'Manodopera: € per lavoratore al giorno', t: 'number', req: true, half: true }, { k: 'maggWeekend', l: 'Maggiorazione weekend/festivi %', t: 'number', half: true }, { k: 'energiaKwh', l: 'Energia: € per kWh', t: 'number', half: true }, { k: 'batteriaKwh', l: 'Batteria: € per kWh', t: 'number', half: true }, { k: 'ricaricoCliente', l: 'Ricarico cliente predefinito %', t: 'number', half: true, hint: 'Usato quando aggiungi un costo anche al preventivo cliente.' }, { k: 'dieselConsumo', l: 'Diesel: consumo l/100 km', t: 'number', half: true }, { k: 'dieselPrezzo', l: 'Diesel: € al litro', t: 'number', half: true }, { k: 'benzinaConsumo', l: 'Benzina: consumo l/100 km', t: 'number', half: true }, { k: 'benzinaPrezzo', l: 'Benzina: € al litro', t: 'number', half: true }, { k: 'elettricoConsumo', l: 'Elettrico: consumo kWh/100 km', t: 'number', half: true }, { k: 'elettricoPrezzo', l: 'Elettrico: € al kWh', t: 'number', half: true }], values: d, onSave: (v) => put('impostazioni', 'costiDefault', v) }); };
 function tabEconomia(c) {
   const inc = incassatoC(c), prev = previstoC(c), costi = costiC(c);
   const pag = tbl([
@@ -1897,21 +1914,32 @@ function prevCostoForm(cat, i) {
   if (!S.prev) return; migraPrev(S.prev);
   const c = G('clienti', S.id), nuovo = i == null || i === '', d = cd();
   let defaults = { categoria: cat, data: today() };
-  if (cat === 'MANODOPERA') defaults.tariffa = d.tariffaGiorno;
+  if (cat === 'MANODOPERA') { defaults.tariffa = d.tariffaGiorno; defaults.giorniWe = 0; defaults.magg = d.maggWeekend; }
   if (cat === 'ENERGIA') defaults.prezzoKwh = d.energiaKwh;
+  if (cat === 'BATTERIA') defaults.prezzoKwh = d.batteriaKwh;
   if (cat === 'CARBURANTE') { defaults.alimentazione = 'DIESEL'; defaults.consumo = d.dieselConsumo; defaults.prezzo = d.dieselPrezzo; }
   const cur = nuovo ? defaults : S.prev.costi[+i];
+  /* solo per voci nuove: opzione per generare subito anche la riga al cliente, col ricarico. */
+  const extra = nuovo ? [{ k: '_addCli', l: 'Aggiungi anche al preventivo cliente', t: 'checkbox' }, { k: '_ricCli', l: 'Ricarico cliente %', t: 'number', half: true, def: d.ricaricoCliente, hint: 'Prezzo cliente = costo × (1 + ricarico).' }] : [];
   openForm({
-    title: lab(CAT_COSTO, cat), fields: costoFields(cat, c || {}), values: cur,
+    title: lab(CAT_COSTO, cat), fields: costoFields(cat, c || {}).concat(extra), values: cur,
     folder: c ? ['Clienti', c.ragioneSociale, 'Offerte e preventivi', 'Costi interni'] : undefined,
     onSave: async (v) => {
+      const addCli = !!v._addCli, ric = num(v._ricCli);
       let item = Object.assign({}, cur, v);
+      delete item._addCli; delete item._ricCli;
       item.categoria = cat;
       item.importo = calcCosto(cat, item);
-      if (['MANODOPERA', 'CARBURANTE', 'ENERGIA'].includes(cat) && !item.descrizione) item.descrizione = COSTO_DESCR(cat, item);
+      if (['MANODOPERA', 'CARBURANTE', 'ENERGIA', 'FV', 'POMPA', 'BATTERIA'].includes(cat) && !item.descrizione) item.descrizione = COSTO_DESCR(cat, item);
       if (cat === 'ENERGIA' && !item.descrizione) item.descrizione = 'Energia';
       migraPrev(S.prev);
       if (nuovo) { item.id = uid(); S.prev.costi.push(item); } else S.prev.costi[+i] = item;
+      if (addCli) {
+        let q = 1, um = '', puBase = num(item.importo) * (1 + ric / 100);
+        if (cat === 'FV' || cat === 'POMPA') { q = num(item.kw) || 1; um = 'kW'; puBase = num(item.prezzoKw) * (1 + ric / 100); }
+        else if (cat === 'BATTERIA') { q = num(item.kwh) || 1; um = 'kWh'; puBase = num(item.prezzoKwh) * (1 + ric / 100); }
+        S.prev.cliente.push({ id: uid(), nome: item.descrizione || lab(CAT_COSTO, cat), um: um, q: q, pu: r2(puBase), descrEstesa: '', incluso: false, inPrev: true });
+      }
       closeModal(); queueRender();
     }
   });
