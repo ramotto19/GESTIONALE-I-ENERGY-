@@ -970,11 +970,12 @@ function nuovaCommessa(preset, after) {
   preset = preset || {};
   if (!preset.clienteId && !D('clienti').some((c) => statoCli(c) === 'ACQUISITO')) { toast('Serve almeno un cliente acquisito per creare una commessa. Segna un cliente come acquisito, oppure carica un’offerta e segnala l’accettazione.', 'err'); go('clienti'); return; }
   const docs = preset._docs; delete preset._docs;
+  const costiSeed = preset._costi; delete preset._costi;
   openForm({
     title: 'Nuova commessa', wide: true, info: 'L’iter (preventivo, conferma d’ordine, POS, DICO…) e la checklist di cantiere si creano da soli in base alle tipologie scelte.',
     fields: commessaFields(preset.clienteId), values: Object.assign({ codice: nextCodice(), stato: 'OFFERTA', aliquotaIva: 22 }, preset),
     folder: (out) => ['Commesse', out.codice || 'Nuova commessa'],
-    onSave: async (v) => { const id = newId('commesse'); await put('commesse', id, Object.assign({}, v, { iter: newIter(), fasi: [], sicurezza: [], pagamenti: [], costi: [], creataIl: today() }, docs ? { documentiAmm: docs } : {})); if (after) { try { await after(id); } catch (e) { /* il collegamento si rifà a mano */ } } go('commessa', id, 'panoramica'); }
+    onSave: async (v) => { const id = newId('commesse'); await put('commesse', id, Object.assign({}, v, { iter: newIter(), fasi: [], sicurezza: [], pagamenti: [], costi: (costiSeed && costiSeed.length) ? costiSeed : [], creataIl: today() }, docs ? { documentiAmm: docs } : {})); if (after) { try { await after(id); } catch (e) { /* il collegamento si rifà a mano */ } } go('commessa', id, 'panoramica'); }
   });
 }
 A.newC = () => nuovaCommessa({});
@@ -1265,10 +1266,13 @@ function tabEconomia(c) {
     { h: 'Stato', f: (p) => stBadge(STATI_PAG, statoP(p)) },
     { h: '', f: (p, i) => '<div class="row"><button class="btn sm" data-a="incNew" data-id="' + esc(c.id) + '" data-i="' + i + '">Incasso</button><button class="btn sm" data-a="pagEdit" data-id="' + esc(c.id) + '" data-i="' + i + '">Modifica</button></div>' }
   ], c.pagamenti || [], { empty: 'Nessuna scadenza di pagamento. Aggiungi acconto, SAL e saldo.' });
-  const cst = tbl([{ h: 'Voce', f: (x) => '<b>' + esc(x.descrizione || lab(CAT_COSTO, x.categoria || 'FORNITORE')) + '</b><div class="small muted">' + esc([x.fornitore, x.numeroFattura ? 'fatt. ' + x.numeroFattura : ''].filter(Boolean).join(' · ')) + '</div>' }, { h: 'Tipo', f: (x) => stBadge(CAT_COSTO, x.categoria || 'FORNITORE') }, { h: 'Data', f: (x) => esc(fmtD(x.data)) }, { h: 'Importo', r: true, f: (x) => eur(x.importo) }, { h: 'File', f: (x) => fileLink(x.file) }], c.costi || [], { empty: 'Nessun costo registrato. Aggiungi fatture, pedaggi, carburante, energia o manodopera.', row: (x, i) => 'data-a="costEdit" data-id="' + esc(c.id) + '" data-i="' + i + '"' });
+  const diffCosto = (x) => { if (!x.daPreventivo || x.importoPreventivo == null) return ''; const dlt = r2(num(x.importo) - num(x.importoPreventivo)); if (!dlt) return '<div class="small" style="color:var(--mu)">in linea col preventivo</div>'; const up = dlt > 0; return '<div class="small" style="color:' + (up ? 'var(--red-tx)' : 'var(--green-tx,#2e7d32)') + '">' + (up ? '+' : '−') + eur(Math.abs(dlt)) + (up ? ' sopra' : ' sotto') + ' preventivo</div>'; };
+  const cst = tbl([{ h: 'Voce', f: (x) => '<b>' + esc(x.descrizione || lab(CAT_COSTO, x.categoria || 'FORNITORE')) + '</b>' + (x.daPreventivo ? ' <span class="badge" style="font-size:10px">da preventivo</span>' : '') + '<div class="small muted">' + esc([x.fornitore, x.numeroFattura ? 'fatt. ' + x.numeroFattura : ''].filter(Boolean).join(' · ')) + '</div>' }, { h: 'Tipo', f: (x) => stBadge(CAT_COSTO, x.categoria || 'FORNITORE') }, { h: 'Preventivato', r: true, f: (x) => (x.daPreventivo && x.importoPreventivo != null) ? eur(x.importoPreventivo) : '—' }, { h: 'Reale', r: true, f: (x) => '<b>' + eur(x.importo) + '</b>' + diffCosto(x) }, { h: 'File', f: (x) => fileLink(x.file) }], c.costi || [], { empty: 'Nessun costo registrato. Aggiungi fatture, pedaggi, carburante, energia o manodopera.', row: (x, i) => 'data-a="costEdit" data-id="' + esc(c.id) + '" data-i="' + i + '"' });
   const fP = fattureCom(c.id, 'P'), fA = fattureCom(c.id, 'A');
   const fRows = (arr) => arr.length ? '<div class="small muted" style="margin:8px 0 4px">' + (arr === fP ? 'Fatture dei fornitori (da Fatture)' : 'Fatture emesse al cliente (da Fatture)') + '</div>' + tbl([{ h: 'Fattura', f: (f) => '<b>' + esc(f.controparte || '') + '</b><div class="small muted">fatt. ' + esc(f.numero || '') + ' · ' + esc(fmtD(f.data)) + '</div>' }, { h: 'Imponibile', r: true, f: (f) => eur2(f.imponibile) }, { h: 'Stato', f: (f) => fatStato(f) }], arr, { row: (f) => 'data-a="fatEdit" data-id="' + esc(f.id) + '"' }) : '';
   const chipF = fP.length ? '<div class="row" style="margin:0 0 10px"><span class="badge amber">Fatture fornitori: ' + eur2(sum(fP, (f) => f.imponibile)) + '</span></div>' : '';
+  const costiPrev = (c.costi || []).filter((x) => x.daPreventivo && x.importoPreventivo != null);
+  const chipPrev = costiPrev.length ? (() => { const tp = r2(sum(costiPrev, (x) => num(x.importoPreventivo))), tr = r2(sum(costiPrev, (x) => num(x.importo))), dl = r2(tr - tp); const col = dl > 0 ? 'red' : (dl < 0 ? 'green' : 'grey'); return '<div class="row" style="flex-wrap:wrap;gap:8px;margin:0 0 10px"><span class="badge grey">Preventivato: ' + eur(tp) + '</span><span class="badge blue">Reale: ' + eur(tr) + '</span><span class="badge ' + col + '">' + (dl > 0 ? '+' : dl < 0 ? '−' : '±') + eur(Math.abs(dl)) + (dl > 0 ? ' sopra preventivo' : dl < 0 ? ' sotto preventivo' : ' in linea') + '</span></div>'; })() : '';
   const perCat = CAT_COSTO.map((k) => [k, sum((c.costi || []).filter((x) => (x.categoria || 'FORNITORE') === k[0]), (x) => x.importo)]).filter((r) => r[1] > 0);
   const chips = perCat.length ? '<div class="row" style="flex-wrap:wrap;gap:8px;margin:0 0 10px">' + perCat.map((r) => '<span class="badge ' + r[0][2] + '">' + esc(r[0][1]) + ': ' + eur(r[1]) + '</span>').join('') + '</div>' : '';
   const docsAmm = (c.documentiAmm || []).filter((x) => !TIPI_DOC_TEC.includes(x.tipo)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
@@ -1278,7 +1282,7 @@ function tabEconomia(c) {
   const docC = tbl(colDocComm, docsAmm.filter((x) => !OFF_T.includes(x.tipo)), { empty: 'Nessun documento caricato: contratto, conferma d’ordine, DICO…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
   const docT_unused = tbl(colDocComm, docsTec, { empty: 'Nessun documento caricato: progetti, valutazioni energetiche, bollette del cliente, schede tecniche dei materiali…', row: (x) => 'data-a="docCommEdit" data-id="' + esc(c.id) + '" data-x="' + esc(x.id) + '"' });
   return '<div class="grid g4" style="margin-bottom:16px">' + kpi('Importo contratto', eur(c.importo), '+ IVA ' + (c.aliquotaIva || 0) + '%') + kpi('Incassato', eur(inc), (Number(c.importo) ? Math.round(100 * inc / Number(c.importo)) : 0) + '% del contratto') + kpi('Ancora da incassare', eur(Math.max(0, prev - inc)), 'Su scadenze registrate: ' + eur(prev)) + kpi('Margine attuale', eur(Number(c.importo) - costi), 'Costi registrati: ' + eur(costi)) + '</div><div class="stack">' +
-    card('Offerte e preventivi', docOff, '<button class="btn p sm" data-a="docOffNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Contratto e ordini', docC, '<button class="btn p sm" data-a="docCommNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Pagamenti e incassi', pag + fRows(fA), '<button class="btn p sm" data-a="pagNew" data-id="' + esc(c.id) + '">+ Pagamento</button>') + card('Costi e fornitori', chips + chipF + cst + fRows(fP), CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="costNewCat" data-id="' + esc(c.id) + '" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '')) + '</div>';
+    card('Offerte e preventivi', docOff, '<button class="btn p sm" data-a="docOffNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Contratto e ordini', docC, '<button class="btn p sm" data-a="docCommNew" data-id="' + esc(c.id) + '">+ Documento</button>') + card('Pagamenti e incassi', pag + fRows(fA), '<button class="btn p sm" data-a="pagNew" data-id="' + esc(c.id) + '">+ Pagamento</button>') + card('Costi e fornitori', chipPrev + chips + chipF + cst + fRows(fP), CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="costNewCat" data-id="' + esc(c.id) + '" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '')) + '</div>';
 }
 A.pagNew = (d) => editSub({ col: 'commesse', id: d.id, key: 'pagamenti', title: 'Scadenza di pagamento', fields: pagFields(), defaults: { incassi: [] } });
 A.pagEdit = (d) => editSub({ col: 'commesse', id: d.id, key: 'pagamenti', i: d.i, title: 'Scadenza di pagamento', fields: pagFields() });
@@ -1542,7 +1546,11 @@ async function offAccettata(cid, oid) {
   if (!(await confirmBox('Offerta accettata. Segno “' + c.ragioneSociale + '” come cliente acquisito e creo la commessa con i dati dell’offerta?', 'Crea commessa'))) return;
   if (statoCli(c) !== 'ACQUISITO') { const d2 = clone(c); d2.stato = 'ACQUISITO'; applyLocalWrite('clienti', cid, d2); await patch('clienti', cid, { stato: 'ACQUISITO' }); }
   const serOff = serialParts(o.numero) ? String(o.numero).replace(/^OFF-/, '') : null;
-  const preset = { clienteId: cid, titolo: o.titolo, importo: o.importo, stato: 'ACQUISITA', _docs: o.file ? [{ id: uid(), tipo: 'OFFERTA_ACCETTATA', titolo: o.titolo, data: o.data || today(), file: o.file }] : undefined };
+  /* costi preventivati → costi della commessa: baseline da confermare o correggere, con l'importo
+     di preventivo tenuto a parte per evidenziare poi la differenza col costo reale. */
+  const pv = o.preventivo ? migraPrev(clone(o.preventivo)) : null;
+  const costiSeed = pv && pv.costi ? pv.costi.map((v) => Object.assign({}, v, { id: uid(), daPreventivo: true, importoPreventivo: costoImporto(v) })) : [];
+  const preset = { clienteId: cid, titolo: o.titolo, importo: o.importo, stato: 'ACQUISITA', _costi: costiSeed, _docs: o.file ? [{ id: uid(), tipo: 'OFFERTA_ACCETTATA', titolo: o.titolo, data: o.data || today(), file: o.file }] : undefined };
   if (serOff && !D('commesse').some((cm) => cm.codice === serOff)) preset.codice = serOff;
   nuovaCommessa(preset, async (id) => {
     const arr = clone(G('clienti', cid).offerte || []).map((x) => (x.id === oid ? Object.assign({}, x, { commessaId: id }) : x));
@@ -1666,20 +1674,28 @@ function migraVoce(v, d) {
         al cliente). Da qui in poi non sono più collegate riga per riga: cancellare o aggiungere
         da una parte non tocca l'altra. Il prezzo cliente viene "congelato" al valore di allora
         (prima era costo + ricarico), così resta indipendente dai costi. */
+/* importo di una riga di costo: le righe "a calcolo" (manodopera, carburante, energia) hanno già
+   importo salvato; le vecchie righe libere avevano q·cu. */
+function costoImporto(v) { return (v && v.importo != null && v.importo !== '') ? num(v.importo) : r2(num(v.q) * num(v.cu)); }
+/* porta una vecchia riga costo (nome/q/cu) al modello a categorie condiviso con la commessa. */
+function normCosto(v) {
+  if (v && v.importo != null && v.categoria) return v;
+  return { id: (v && v.id) || uid(), categoria: (v && v.categoria) || 'PEDAGGI', descrizione: (v && (v.descrizione || v.nome)) || 'Costo', importo: costoImporto(v || {}), data: (v && v.data) || '' };
+}
 function migraPrev(d) {
   if (!d) return d;
   if (!d._rig) { const orig = d.voci || []; d.voci = orig.map((v) => migraVoce(v, { voci: orig, margine: d.margine })); d._rig = true; }
   if (!d._v2) {
     const vs = d.voci || [];
-    d.costi = vs.map((v) => ({ id: uid(), nome: v.nome || 'Voce', um: v.um || '', q: num(v.q) || 1, cu: (v.cu === '' || v.cu == null) ? '' : num(v.cu) }));
+    d.costi = vs.map((v) => ({ id: uid(), categoria: 'PEDAGGI', descrizione: v.nome || 'Costo', importo: r2(num(v.q) * num(v.cu)), data: '' }));
     d.cliente = vs.filter((v) => v.inPrev !== false).map((v) => ({ id: uid(), nome: v.nome || 'Voce', um: v.um || '', q: num(v.q) || 1, pu: rigaPrezzoU(v, d), descrEstesa: v.descrEstesa || '', incluso: !!v.incluso, inPrev: true }));
-    d._v2 = true;
+    d._v2 = true; d._costiCat = true;
   }
   if (!d.costi) d.costi = [];
   if (!d.cliente) d.cliente = [];
+  if (!d._costiCat) { d.costi = d.costi.map(normCosto); d._costiCat = true; }
   return d;
 }
-function costoRiga(v) { return r2(num(v.q) * num(v.cu)); }
 function clienteRiga(v) { return r2(num(v.q) * num(v.pu)); }
 /* righe come le vede il cliente: le voci "incluse" spariscono e il loro importo si spalma sulle altre. */
 function clientLines(d) {
@@ -1704,7 +1720,7 @@ function nuovaVoce(tipo) {
 function nuovoPrev() { return { voci: [], margine: ld().margine, iva: ld().iva, sconto: 0, validitaGiorni: 30, antic: 30, meta: 40, saldo: 30, riferimento: '', intro: INTRO_DEF, note: '' }; }
 const prevTotals = (d) => {
   migraPrev(d);
-  const costi = r2((d.costi || []).reduce((s, v) => s + costoRiga(v), 0));
+  const costi = r2((d.costi || []).reduce((s, v) => s + costoImporto(v), 0));
   const imp = r2((d.cliente || []).filter((v) => v.inPrev !== false).reduce((s, v) => s + clienteRiga(v), 0));
   const sconto = r2(imp * num(d.sconto) / 100), netto = r2(imp - sconto), iva = r2(netto * num(d.iva) / 100);
   const utile = r2(netto - costi), margineEff = netto > 0 ? Math.round(utile / netto * 1000) / 10 : 0;
@@ -1817,17 +1833,15 @@ function vPreventivo() {
   const inp = (k, val, w) => '<input type="number" step="any" inputmode="decimal" data-in="prevTop" data-k="' + k + '" value="' + esc(val) + '" style="width:' + (w || 62) + 'px;display:inline-block;padding:4px 6px">';
   const metrica = (label, val, id) => '<div class="mcard"><div class="small muted" style="margin-bottom:2px">' + esc(label) + '</div><b id="' + id + '" style="font-size:15px">' + val + '</b></div>';
   const optCat = (idSel) => '<select id="' + idSel + '"><option value="">— dal listino —</option>' + cat.map((it, j) => '<option value="' + j + '">' + esc(it.nome) + (it.um ? ' (' + esc(it.um) + ')' : '') + '</option>').join('') + '</select>';
-  /* ---- AREA INTERNA (riservata): lista costi indipendente + riepilogo. Nascosta in "Vista cliente". ---- */
-  const costHead = '<thead><tr><th>Voce di costo</th><th class="n">Q.tà</th><th>Um</th><th class="n">Costo un.</th><th class="n">Costo riga</th><th></th></tr></thead>';
+  /* ---- AREA INTERNA (riservata): costi a categorie, stesse regole della commessa. ---- */
+  const costHead = '<thead><tr><th>Voce di costo</th><th>Tipo</th><th class="n">Importo</th><th></th></tr></thead>';
   const costBody = (d.costi || []).map((v, i) =>
-    '<tr><td><input class="nm" data-in="costEdit" data-i="' + i + '" data-k="nome" value="' + esc(v.nome) + '" placeholder="Es. Materiali (fattura), Manodopera…"></td>'
-    + '<td class="n"><input data-in="costEdit" data-i="' + i + '" data-k="q" value="' + esc(v.q) + '"></td>'
-    + '<td><input data-in="costEdit" data-i="' + i + '" data-k="um" value="' + esc(v.um) + '" placeholder="pz"></td>'
-    + '<td class="n"><input data-in="costEdit" data-i="' + i + '" data-k="cu" value="' + esc(v.cu) + '"></td>'
-    + '<td class="n" id="cst_' + v.id + '">' + eur2(costoRiga(v)) + '</td>'
-    + '<td class="n"><button class="xb" data-a="costDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>').join('');
-  const costTable = (d.costi && d.costi.length) ? '<div class="prevwrap"><table class="prevtbl">' + costHead + '<tbody>' + costBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessun costo. Aggiungi le tue voci di costo (anche una sola riga "Materiali" da fattura).</div>';
-  const addCost = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0"><span class="small muted">Aggiungi un costo:</span>' + optCat('prevPickCosto') + '<button class="btn sm p" data-a="costAddListino">+ Dal listino</button><button class="btn sm" data-a="costAdd">+ Riga costo</button></div>';
+    '<tr data-a="pCostEdit" data-i="' + i + '" style="cursor:pointer"><td><b>' + esc(v.descrizione || lab(CAT_COSTO, v.categoria || 'PEDAGGI')) + '</b>' + (v.data ? '<div class="small muted">' + esc(fmtD(v.data)) + '</div>' : '') + '</td>'
+    + '<td>' + stBadge(CAT_COSTO, v.categoria || 'PEDAGGI') + '</td>'
+    + '<td class="n">' + eur2(costoImporto(v)) + '</td>'
+    + '<td class="n"><button class="xb" data-a="pCostDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>').join('');
+  const costTable = (d.costi && d.costi.length) ? '<div class="prevwrap"><table class="prevtbl">' + costHead + '<tbody>' + costBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessun costo. Aggiungi i tuoi costi (anche una sola riga "Fattura fornitore" per i materiali).</div>';
+  const addCost = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0">' + CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="pCostNew" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '') + '</div>';
   const riepInterno = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px">'
     + metrica('Totale costi', eur2(T.costi), 'prevCosti')
     + metrica('Utile stimato', eur2(T.utile), 'prevUtile')
@@ -1870,7 +1884,6 @@ function vPreventivo() {
 }
 function prevRecalc() {
   const d = S.prev; if (!d) return; migraPrev(d);
-  (d.costi || []).forEach((v) => { const e = document.getElementById('cst_' + v.id); if (e) e.textContent = eur2(costoRiga(v)); });
   (d.cliente || []).forEach((v) => { const e = document.getElementById('cli_' + v.id); if (e) e.textContent = eur2(clienteRiga(v)); });
   const T = prevTotals(d), set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = eur2(val); };
   set('prevCosti', T.costi); set('prevImp', T.imp); set('prevNetto', T.netto); set('prevIva', T.iva); set('prevTot', T.tot); set('prevUtile', T.utile);
@@ -1879,19 +1892,34 @@ function prevRecalc() {
   const rm = document.getElementById('prevRicMed'); if (rm) rm.textContent = T.ricMed + '%';
   const cp = document.getElementById('prevCliPrev'); if (cp) cp.innerHTML = cliPreviewHtml(d);
 }
-/* ---- Costi (area riservata): lista indipendente ---- */
-I.costEdit = (ds, val) => { const v = S.prev && S.prev.costi[+ds.i]; if (!v) return; v[ds.k] = val; prevRecalc(); };
-A.costAdd = () => { if (!S.prev) return; migraPrev(S.prev); S.prev.costi.push({ id: uid(), nome: '', um: '', q: 1, cu: '' }); queueRender(); };
-A.costAddListino = () => {
+/* ---- Costi del preventivo (area riservata): stesse categorie e regole della commessa ---- */
+function prevCostoForm(cat, i) {
   if (!S.prev) return; migraPrev(S.prev);
-  const sel = document.getElementById('prevPickCosto'), it = sel && sel.value !== '' ? listinoCat()[+sel.value] : null;
-  if (!it) { toast('Scegli prima una voce dal listino.'); return; }
-  let cu = '', q0 = 1, um = it.um || '';
-  if (it.scaglioni && it.scaglioni.length) { q0 = num(it.scaglioni[0].da) || 1; um = it.um || 'kW'; cu = pkwFor(it.scaglioni, q0); }
-  else if (it.cu !== '' && it.cu != null) cu = num(it.cu);
-  S.prev.costi.push({ id: uid(), nome: it.nome, um: um, q: q0, cu: cu }); queueRender();
-};
-A.costDel = (d) => { if (S.prev && S.prev.costi) { S.prev.costi.splice(+d.i, 1); queueRender(); } };
+  const c = G('clienti', S.id), nuovo = i == null || i === '', d = cd();
+  let defaults = { categoria: cat, data: today() };
+  if (cat === 'MANODOPERA') defaults.tariffa = d.tariffaGiorno;
+  if (cat === 'ENERGIA') defaults.prezzoKwh = d.energiaKwh;
+  if (cat === 'CARBURANTE') { defaults.alimentazione = 'DIESEL'; defaults.consumo = d.dieselConsumo; defaults.prezzo = d.dieselPrezzo; }
+  const cur = nuovo ? defaults : S.prev.costi[+i];
+  openForm({
+    title: lab(CAT_COSTO, cat), fields: costoFields(cat, c || {}), values: cur,
+    folder: c ? ['Clienti', c.ragioneSociale, 'Offerte e preventivi', 'Costi interni'] : undefined,
+    onSave: async (v) => {
+      let item = Object.assign({}, cur, v);
+      item.categoria = cat;
+      item.importo = calcCosto(cat, item);
+      if (['MANODOPERA', 'CARBURANTE', 'ENERGIA'].includes(cat) && !item.descrizione) item.descrizione = COSTO_DESCR(cat, item);
+      if (cat === 'ENERGIA' && !item.descrizione) item.descrizione = 'Energia';
+      migraPrev(S.prev);
+      if (nuovo) { item.id = uid(); S.prev.costi.push(item); } else S.prev.costi[+i] = item;
+      closeModal(); queueRender();
+    }
+  });
+  liveCostoForm(cat, nuovo);
+}
+A.pCostNew = (d) => prevCostoForm(d.cat || 'FORNITORE', null);
+A.pCostEdit = (d) => { const v = S.prev && S.prev.costi[+d.i]; if (v) prevCostoForm(v.categoria || 'PEDAGGI', +d.i); };
+A.pCostDel = (d) => { if (S.prev && S.prev.costi) { S.prev.costi.splice(+d.i, 1); queueRender(); } };
 /* ---- Righe cliente: lista indipendente dai costi ---- */
 I.cliEdit = (ds, val) => { const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = val; prevRecalc(); };
 I.cliChk = (ds, val, el) => { const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = !!(el && el.checked); queueRender(); };
