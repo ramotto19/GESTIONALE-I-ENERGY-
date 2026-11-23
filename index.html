@@ -286,19 +286,28 @@ function go(route, id, tab) { if (route === 'mezzo') S.mtab = 'pano'; S.route = 
 let FORM = null;
 /* blocco dello scroll di sfondo, con conteggio perché i modali si possono sovrapporre (es. una
    conferma sopra un form): si sblocca solo quando l'ultimo è chiuso, ripristinando la posizione. */
-let scrollLocks = 0, savedScrollY = 0;
-function lockScroll() { if (scrollLocks === 0) { savedScrollY = window.scrollY || window.pageYOffset || 0; document.body.style.top = (-savedScrollY) + 'px'; document.documentElement.classList.add('modal-open'); document.body.classList.add('modal-open'); } scrollLocks++; }
-function unlockScroll() { if (scrollLocks === 0) return; scrollLocks--; if (scrollLocks === 0) { document.documentElement.classList.remove('modal-open'); document.body.classList.remove('modal-open'); document.body.style.top = ''; window.scrollTo(0, savedScrollY); } }
-function openModal(html, wide) { $('#modal').innerHTML = '<div class="ov"><div class="mod' + (wide ? ' wide' : '') + '" role="dialog" aria-modal="true">' + html + '</div></div>'; lockScroll(); const f = $('#modal input:not([type=hidden]):not([type=checkbox]),#modal select,#modal textarea'); if (f) f.focus(); }
-function closeModal() { const m = $('#modal'); const had = m && m.innerHTML; if (m) m.innerHTML = ''; FORM = null; if (had) unlockScroll(); }
+let scrollLocked = false, savedScrollY = 0;
+/* Lo scroll di sfondo è bloccato se e solo se c'è un modale aperto (#modal) o una conferma
+   (#dlg). Deriviamo lo stato dai contenuti reali invece di contare lock/unlock: così un form
+   riaperto, un doppio clic o un errore tra apertura e chiusura non lasciano più la pagina
+   bloccata (il "blocco dello scroll" che ogni tanto congelava preventivo e fatture). */
+function syncScroll() {
+  const m = $('#modal'), dl = $('#dlg');
+  const open = !!((m && m.innerHTML) || (dl && dl.innerHTML));
+  if (open === scrollLocked) return;
+  if (open) { savedScrollY = window.scrollY || window.pageYOffset || 0; document.body.style.top = (-savedScrollY) + 'px'; document.documentElement.classList.add('modal-open'); document.body.classList.add('modal-open'); scrollLocked = true; }
+  else { document.documentElement.classList.remove('modal-open'); document.body.classList.remove('modal-open'); document.body.style.top = ''; scrollLocked = false; window.scrollTo(0, savedScrollY); }
+}
+function openModal(html, wide) { $('#modal').innerHTML = '<div class="ov"><div class="mod' + (wide ? ' wide' : '') + '" role="dialog" aria-modal="true">' + html + '</div></div>'; syncScroll(); const f = $('#modal input:not([type=hidden]):not([type=checkbox]),#modal select,#modal textarea'); if (f) f.focus(); }
+function closeModal() { const m = $('#modal'); if (m) m.innerHTML = ''; FORM = null; syncScroll(); }
 function toast(msg, kind) { const t = $('#toast'); if (!t) return; t.textContent = msg; t.className = 'toast show ' + (kind || ''); clearTimeout(toast.t); toast.t = setTimeout(() => { t.className = 'toast'; }, 3500); }
 function confirmBox(msg, label) {
   return new Promise((res) => {
     const el = $('#dlg');
     el.innerHTML = '<div class="ov top"><div class="mod sm" role="alertdialog"><p style="margin:0">' + esc(msg) + '</p><div class="row end"><button class="btn" id="dlgNo">Annulla</button><button class="btn p" id="dlgYes">' + esc(label || 'Conferma') + '</button></div></div></div>';
-    lockScroll();
-    $('#dlgNo').onclick = () => { el.innerHTML = ''; unlockScroll(); res(false); };
-    $('#dlgYes').onclick = () => { el.innerHTML = ''; unlockScroll(); res(true); };
+    syncScroll();
+    $('#dlgNo').onclick = () => { el.innerHTML = ''; syncScroll(); res(false); };
+    $('#dlgYes').onclick = () => { el.innerHTML = ''; syncScroll(); res(true); };
     $('#dlgYes').focus();
   });
 }
