@@ -1859,6 +1859,7 @@ function vPreventivo() {
     + '<td class="n"><button class="xb" data-a="pCostDel" data-i="' + i + '" aria-label="Togli">×</button></td></tr>').join('');
   const costTable = (d.costi && d.costi.length) ? '<div class="prevwrap"><table class="prevtbl">' + costHead + '<tbody>' + costBody + '</tbody></table></div>' : '<div class="empty" style="margin:4px 0">Nessun costo. Aggiungi i tuoi costi (anche una sola riga "Fattura fornitore" per i materiali).</div>';
   const addCost = '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0">' + CAT_COSTO.map((k) => '<button class="btn ' + (k[0] === 'FORNITORE' ? 'p ' : '') + 'sm" data-a="pCostNew" data-cat="' + k[0] + '">+ ' + esc(k[1]) + '</button>').join('') + (S.admin ? '<button class="btn sm" data-a="costiParam">Parametri</button>' : '') + '</div>';
+  const addCostList = cat.length ? '<div class="row" style="flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 0"><span class="small muted">Dal listino:</span><select id="prevPickCostoListino"><option value="">— scegli —</option>' + cat.map((it, j) => '<option value="' + j + '">' + esc(it.nome) + (it.um ? ' (' + esc(it.um) + ')' : '') + '</option>').join('') + '</select><button class="btn sm" data-a="pCostAddListino">+ Dal listino</button><button class="btn sm" data-a="listinoCat">Gestisci listino</button></div>' : '';
   const riepInterno = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px">'
     + metrica('Totale costi', eur2(T.costi), 'prevCosti')
     + metrica('Utile stimato', eur2(T.utile), 'prevUtile')
@@ -1867,7 +1868,7 @@ function vPreventivo() {
     + '</div><div class="small muted" style="margin-top:6px">Confronto fra il totale dei tuoi costi e l’imponibile del preventivo cliente. Le due liste sono indipendenti.</div>';
   const zonaInterna = cliView ? '' : '<section class="zprev zint">'
     + '<div class="ch" style="align-items:flex-start"><div><h2 style="margin:0">🔒 I miei costi <span class="small muted" style="font-weight:400">— area riservata</span></h2><div class="small muted">I tuoi costi reali, scollegati dalle righe mostrate al cliente. Non compaiono mai nel PDF.</div></div></div>'
-    + costTable + addCost + riepInterno + '</section>';
+    + costTable + addCost + addCostList + riepInterno + '</section>';
   /* ---- AREA CLIENTE (verde): lista righe cliente indipendente + totali. ---- */
   const cliHead = '<thead><tr><th>Voce (al cliente)</th><th class="n">Q.tà</th><th>Um</th><th class="n">Prezzo un.</th><th class="n">Importo</th><th></th></tr></thead>';
   const cliBody = (d.cliente || []).map((v, i) =>
@@ -1912,7 +1913,7 @@ function prevRecalc() {
   const cp = document.getElementById('prevCliPrev'); if (cp) cp.innerHTML = cliPreviewHtml(d);
 }
 /* ---- Costi del preventivo (area riservata): stesse categorie e regole della commessa ---- */
-function prevCostoForm(cat, i) {
+function prevCostoForm(cat, i, preset) {
   if (!S.prev) return; migraPrev(S.prev);
   const c = G('clienti', S.id), nuovo = i == null || i === '', d = cd();
   let defaults = { categoria: cat, data: today() };
@@ -1920,6 +1921,7 @@ function prevCostoForm(cat, i) {
   if (cat === 'ENERGIA') defaults.prezzoKwh = d.energiaKwh;
   if (cat === 'BATTERIA') defaults.prezzoKwh = d.batteriaKwh;
   if (cat === 'CARBURANTE') { defaults.alimentazione = 'DIESEL'; defaults.consumo = d.dieselConsumo; defaults.prezzo = d.dieselPrezzo; }
+  if (nuovo && preset) defaults = Object.assign(defaults, preset);
   const cur = nuovo ? defaults : S.prev.costi[+i];
   /* solo per voci nuove: opzione per generare subito anche la riga al cliente, col ricarico. */
   const extra = nuovo ? [{ k: '_addCli', l: 'Aggiungi anche al preventivo cliente', t: 'checkbox' }, { k: '_ricCli', l: 'Ricarico cliente %', t: 'number', half: true, def: d.ricaricoCliente, hint: 'Prezzo cliente = costo × (1 + ricarico).' }] : [];
@@ -1950,6 +1952,13 @@ function prevCostoForm(cat, i) {
 A.pCostNew = (d) => prevCostoForm(d.cat || 'FORNITORE', null);
 A.pCostEdit = (d) => { const v = S.prev && S.prev.costi[+d.i]; if (v) prevCostoForm(v.categoria || 'PEDAGGI', +d.i); };
 A.pCostDel = (d) => { if (S.prev && S.prev.costi) { S.prev.costi.splice(+d.i, 1); queueRender(); } };
+A.pCostAddListino = () => {
+  if (!S.prev) return; migraPrev(S.prev);
+  const sel = document.getElementById('prevPickCostoListino'), it = sel && sel.value !== '' ? listinoCat()[+sel.value] : null;
+  if (!it) { toast('Scegli prima una voce dal listino.'); return; }
+  if (it.scaglioni && it.scaglioni.length) { prevCostoForm(/pompa/i.test(it.nome) ? 'POMPA' : 'FV', null, { descrizione: it.nome }); return; }
+  prevCostoForm('FORNITORE', null, { descrizione: it.nome, importo: (it.cu !== '' && it.cu != null) ? num(it.cu) : '' });
+};
 /* ---- Righe cliente: lista indipendente dai costi ---- */
 I.cliEdit = (ds, val) => { const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = val; prevRecalc(); };
 I.cliChk = (ds, val, el) => { const v = S.prev && S.prev.cliente[+ds.i]; if (!v) return; v[ds.k] = !!(el && el.checked); queueRender(); };
