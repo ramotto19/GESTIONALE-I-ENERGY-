@@ -4302,18 +4302,21 @@ function getDriveToken(interactive) {
     });
   }
   driveTokenRequest = new Promise((resolve) => {
+    /* se la finestra di Google viene chiusa o bloccata senza che arrivi nessuna risposta, la richiesta
+       restava in sospeso per sempre e ogni "Sfoglia Drive" successivo aspettava invano: dopo 2 minuti si
+       azzera e si può riprovare. Il timer va però ANNULLATO appena arriva una risposta: altrimenti, se
+       nel frattempo era già partita una NUOVA richiesta (token ottenuto e finestra Drive riaperta entro i
+       2 minuti), il timer della richiesta vecchia scattava lo stesso e azzerava per errore quella nuova
+       ancora in corso — facendola sembrare fallita o aprendo un secondo popup di autorizzazione. */
+    const timer = setTimeout(() => { if (driveTokenRequest) { driveTokenRequest = null; resolve(null); } }, 120000);
     driveTokenClient.callback = (resp) => {
-      driveTokenRequest = null;
+      clearTimeout(timer); driveTokenRequest = null;
       if (resp && resp.access_token) { saveDriveToken(resp.access_token, resp.expires_in); resolve(resp.access_token); }
       else resolve(null);
     };
-    driveTokenClient.error_callback = () => { driveTokenRequest = null; resolve(null); };
-    /* se la finestra di Google viene chiusa o bloccata senza che arrivi nessuna risposta, la richiesta
-       restava in sospeso per sempre e ogni "Sfoglia Drive" successivo aspettava invano: dopo 2 minuti si
-       azzera e si può riprovare. */
-    setTimeout(() => { if (driveTokenRequest) { driveTokenRequest = null; resolve(null); } }, 120000);
+    driveTokenClient.error_callback = () => { clearTimeout(timer); driveTokenRequest = null; resolve(null); };
     try { driveTokenClient.requestAccessToken({ prompt: '' }); }
-    catch (e) { driveTokenRequest = null; resolve(null); }
+    catch (e) { clearTimeout(timer); driveTokenRequest = null; resolve(null); }
   });
   return driveTokenRequest;
 }
